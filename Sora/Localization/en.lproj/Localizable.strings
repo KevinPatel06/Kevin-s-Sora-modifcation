@@ -478,5 +478,7 @@
 "Pull to Refresh" = "Pull to Refresh";
 "Pull down to check your library for new episodes." = "Pull down to check your library for new episodes.";
 "No New Episodes" = "No New Episodes";
-"Nothing new in the last 7 days." = "Nothing new in the last 7 days.";
+"No episodes could be loaded for your library." = "No episodes could be loaded for your library.";
+"Matching %1$d of %2$d" = "Matching %1$d of %2$d";
+"Checking %1$d of %2$d" = "Checking %1$d of %2$d";
 "Module not available" = "Module not available";

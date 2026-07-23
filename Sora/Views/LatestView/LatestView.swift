@@ -43,6 +43,15 @@ struct LatestView: View {
                 }
             }
             .navigationTitle(NSLocalizedString("LatestTab", comment: ""))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let progress = latestFeedManager.progress {
+                        Text(progress)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
             .refreshable {
                 await latestFeedManager.refresh(
                     libraryManager: libraryManager,
@@ -86,7 +95,7 @@ struct LatestView: View {
         if !latestFeedManager.hasEverRefreshed {
             return NSLocalizedString("Pull down to check your library for new episodes.", comment: "")
         }
-        return NSLocalizedString("Nothing new in the last 7 days.", comment: "")
+        return NSLocalizedString("No episodes could be loaded for your library.", comment: "")
     }
 
     @ViewBuilder

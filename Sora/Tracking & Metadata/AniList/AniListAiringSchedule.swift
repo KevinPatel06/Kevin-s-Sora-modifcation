@@ -7,92 +7,154 @@
 
 import Foundation
 
-struct AiredEpisode {
+/// The most recent episode AniList knows aired for a show.
+struct AniListLatestEpisode {
     let anilistId: Int
-    let episodeNumber: Int
+    /// nil when the date came from the show's end date rather than a schedule.
+    let episodeNumber: Int?
     let airDate: Date
 }
 
-/// Batched lookup of which AniList entries aired an episode inside a time window.
+/// AniList lookups for the Latest tab.
 ///
-/// One request answers the question for every bookmarked show at once, which is
-/// what keeps a Latest refresh cheap: only the handful of shows that actually
-/// aired need their module scraped afterwards.
+/// Note on the API shape: `airingAt_greater`/`airingAt_lesser` are arguments of
+/// the top-level `Page.airingSchedules` query, NOT of the nested
+/// `Media.airingSchedule` field. Putting them on `Media.airingSchedule` makes
+/// AniList reject the whole request, which returns no data at all.
 enum AniListAiringSchedule {
     private static let endpoint = URL(string: "https://graphql.anilist.co")!
 
-    /// AniList caps `perPage` at 50, so ids are queried in chunks.
-    private static let pageSize = 50
+    /// Aliases per request. Each show costs two aliases, so this stays modest
+    /// to keep AniList's query-complexity limit comfortable.
+    private static let chunkSize = 20
 
-    static func fetchRecentlyAired(
+    // MARK: - Latest aired episode
+
+    /// One request answers "what aired most recently" for many shows, using
+    /// GraphQL aliases so each show gets its own precise answer. A shared
+    /// `mediaId_in` page would let a long-running series crowd out the rest.
+    static func latestAired(
         anilistIds: [Int],
-        since: Date,
-        completion: @escaping ([AiredEpisode]) -> Void
+        completion: @escaping ([Int: AniListLatestEpisode]) -> Void
     ) {
-        guard !anilistIds.isEmpty else {
-            completion([])
+        let ids = Array(Set(anilistIds))
+        guard !ids.isEmpty else {
+            completion([:])
             return
         }
 
-        let chunks = stride(from: 0, to: anilistIds.count, by: pageSize).map {
-            Array(anilistIds[$0..<min($0 + pageSize, anilistIds.count)])
+        let chunks = stride(from: 0, to: ids.count, by: chunkSize).map {
+            Array(ids[$0..<min($0 + chunkSize, ids.count)])
         }
 
         let group = DispatchGroup()
         let lock = NSLock()
-        var collected: [AiredEpisode] = []
+        var collected: [Int: AniListLatestEpisode] = [:]
 
         for chunk in chunks {
             group.enter()
-            fetchChunk(ids: chunk, since: since) { episodes in
+            fetchChunk(ids: chunk) { partial in
                 lock.lock()
-                collected.append(contentsOf: episodes)
+                collected.merge(partial) { current, _ in current }
                 lock.unlock()
                 group.leave()
             }
         }
 
-        group.notify(queue: .main) {
-            completion(collected)
-        }
+        group.notify(queue: .main) { completion(collected) }
     }
 
     private static func fetchChunk(
         ids: [Int],
-        since: Date,
-        completion: @escaping ([AiredEpisode]) -> Void
+        completion: @escaping ([Int: AniListLatestEpisode]) -> Void
     ) {
-        let sinceUnix = Int(since.timeIntervalSince1970)
-        let nowUnix = Int(Date().timeIntervalSince1970)
+        let now = Int(Date().timeIntervalSince1970)
 
-        let query = """
-        query ($ids: [Int], $perPage: Int, $since: Int, $until: Int) {
-          Page(page: 1, perPage: $perPage) {
-            media(id_in: $ids, type: ANIME) {
-              id
-              airingSchedule(airingAt_greater: $since, airingAt_lesser: $until) {
-                nodes {
-                  episode
-                  airingAt
-                }
-              }
-            }
-          }
+        var parts: [String] = []
+        for (index, id) in ids.enumerated() {
+            parts.append("s\(index): Page(page: 1, perPage: 1) { airingSchedules(mediaId: \(id), airingAt_lesser: \(now), sort: TIME_DESC) { episode airingAt } }")
+            // Shows older than roughly 2015 have no airingSchedule entries at
+            // all, so fall back to the show's end date for those.
+            parts.append("m\(index): Media(id: \(id)) { episodes endDate { year month day } }")
         }
-        """
+        let query = "query { " + parts.joined(separator: " ") + " }"
 
-        let variables: [String: Any] = [
-            "ids": ids,
-            "perPage": ids.count,
-            "since": sinceUnix,
-            "until": nowUnix
-        ]
+        post(query) { json in
+            guard let data = json?["data"] as? [String: Any] else {
+                Logger.shared.log("AniList latestAired returned no data", type: "Error")
+                completion([:])
+                return
+            }
 
-        guard let body = try? JSONSerialization.data(
-            withJSONObject: ["query": query, "variables": variables]
-        ) else {
-            Logger.shared.log("Failed to encode AniList airing query", type: "Error")
-            completion([])
+            var result: [Int: AniListLatestEpisode] = [:]
+            for (index, id) in ids.enumerated() {
+                if let page = data["s\(index)"] as? [String: Any],
+                   let nodes = page["airingSchedules"] as? [[String: Any]],
+                   let node = nodes.first,
+                   let airingAt = node["airingAt"] as? Int {
+                    result[id] = AniListLatestEpisode(
+                        anilistId: id,
+                        episodeNumber: node["episode"] as? Int,
+                        airDate: Date(timeIntervalSince1970: TimeInterval(airingAt))
+                    )
+                    continue
+                }
+
+                if let media = data["m\(index)"] as? [String: Any],
+                   let end = media["endDate"] as? [String: Any],
+                   let year = end["year"] as? Int {
+                    var components = DateComponents()
+                    components.year = year
+                    components.month = end["month"] as? Int ?? 12
+                    components.day = end["day"] as? Int ?? 28
+                    components.timeZone = TimeZone(identifier: "UTC")
+                    if let date = Calendar(identifier: .gregorian).date(from: components) {
+                        result[id] = AniListLatestEpisode(
+                            anilistId: id,
+                            episodeNumber: media["episodes"] as? Int,
+                            airDate: date
+                        )
+                    }
+                }
+            }
+
+            Logger.shared.log("AniList resolved dates for \(result.count)/\(ids.count) shows", type: "Latest")
+            completion(result)
+        }
+    }
+
+    // MARK: - Fuzzy title match
+
+    /// Resolves a show title to an AniList id. AniList answers HTTP 404 with a
+    /// "Not Found." error body when nothing matches, which is not a failure.
+    static func searchId(title: String, completion: @escaping (Int?) -> Void) {
+        let cleaned = title
+            .replacingOccurrences(of: "\\", with: "")
+            .replacingOccurrences(of: "\"", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleaned.isEmpty else {
+            completion(nil)
+            return
+        }
+
+        let query = "query { Media(search: \"\(cleaned)\", type: ANIME) { id } }"
+        post(query) { json in
+            guard let data = json?["data"] as? [String: Any],
+                  let media = data["Media"] as? [String: Any],
+                  let id = media["id"] as? Int else {
+                completion(nil)
+                return
+            }
+            completion(id)
+        }
+    }
+
+    // MARK: - Transport
+
+    private static func post(_ query: String, completion: @escaping ([String: Any]?) -> Void) {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["query": query]) else {
+            completion(nil)
             return
         }
 
@@ -104,45 +166,21 @@ enum AniListAiringSchedule {
 
         URLSession.custom.dataTask(with: request) { data, _, error in
             if let error = error {
-                Logger.shared.log("AniList airing query failed: \(error.localizedDescription)", type: "Error")
-                completion([])
+                Logger.shared.log("AniList request failed: \(error.localizedDescription)", type: "Error")
+                completion(nil)
                 return
             }
-
             guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let dataDict = json["data"] as? [String: Any],
-                  let page = dataDict["Page"] as? [String: Any],
-                  let mediaList = page["media"] as? [[String: Any]] else {
-                Logger.shared.log("Malformed AniList airing response", type: "Error")
-                completion([])
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                completion(nil)
                 return
             }
-
-            var results: [AiredEpisode] = []
-            for media in mediaList {
-                guard let mediaId = media["id"] as? Int,
-                      let schedule = media["airingSchedule"] as? [String: Any],
-                      let nodes = schedule["nodes"] as? [[String: Any]] else {
-                    continue
-                }
-                for node in nodes {
-                    guard let episode = node["episode"] as? Int,
-                          let airingAt = node["airingAt"] as? Int else {
-                        continue
-                    }
-                    results.append(
-                        AiredEpisode(
-                            anilistId: mediaId,
-                            episodeNumber: episode,
-                            airDate: Date(timeIntervalSince1970: TimeInterval(airingAt))
-                        )
-                    )
-                }
+            if let errors = json["errors"] as? [[String: Any]],
+               let first = errors.first?["message"] as? String,
+               first != "Not Found." {
+                Logger.shared.log("AniList GraphQL error: \(first)", type: "Error")
             }
-
-            Logger.shared.log("AniList reported \(results.count) aired episodes for \(ids.count) shows", type: "Latest")
-            completion(results)
+            completion(json)
         }.resume()
     }
 }

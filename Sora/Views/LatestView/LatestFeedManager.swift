@@ -10,17 +10,20 @@ import SwiftUI
 
 /// Builds the Latest feed from library bookmarks.
 ///
-/// Strategy is provider-first: one batched AniList query (plus TMDB for
-/// anything AniList lacks) answers "which bookmarked shows aired this week",
-/// and only those shows get their module scraped to resolve a playable link.
-/// Scraping every bookmark would be far slower and, because module scraping
-/// must be serialized, would take minutes for a large library.
+/// Every bookmarked show produces exactly one row showing its most recent
+/// episode and when that episode aired. Nothing is filtered out: watched rows
+/// are dimmed by the cell rather than hidden, so the feed never goes empty
+/// because of what you have already seen.
+///
+/// Dates come from AniList, matched by stored id, then by the app's existing
+/// manual-match id, then by fuzzy title search. Episode numbers and links come
+/// from the module, which is the only thing that knows how to play them.
 @MainActor
 final class LatestFeedManager: ObservableObject {
     @Published var entries: [LatestEpisodeEntry] = []
     @Published var isRefreshing = false
-    @Published var providerFailed = false
     @Published var hasEverRefreshed = false
+    @Published var progress: String?
 
     private let matchStore = ProviderMatchStore.shared
     private var moduleRemovedToken: NSObjectProtocol?
@@ -39,7 +42,6 @@ final class LatestFeedManager: ObservableObject {
             Task { @MainActor in
                 LatestFeedCache.removeEntries(moduleId: moduleId)
                 self?.entries = LatestFeedCache.load()
-                Logger.shared.log("Latest: dropped entries for removed module \(moduleId)", type: "Latest")
             }
         }
     }
@@ -60,10 +62,10 @@ final class LatestFeedManager: ObservableObject {
     func refresh(libraryManager: LibraryManager, moduleManager: ModuleManager) async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        providerFailed = false
 
         defer {
             isRefreshing = false
+            progress = nil
             hasEverRefreshed = true
             UserDefaults.standard.set(true, forKey: "latestHasEverRefreshed")
         }
@@ -75,111 +77,106 @@ final class LatestFeedManager: ObservableObject {
             return
         }
 
-        let cutoff = Calendar.current.date(
-            byAdding: .day,
-            value: -LatestFeedCache.windowDays,
-            to: Date()
-        ) ?? Date()
-
-        var unmatched: [Bookmark] = []
-        var tmdbOnly: [(bookmark: Bookmark, tmdbId: Int, tmdbType: String)] = []
-        var anilistIdToBookmark: [Int: Bookmark] = [:]
-
+        // 1. Resolve an AniList id per show. Stored match wins, then the id the
+        //    app has long persisted for manual matches, then a title search.
+        var idByKey: [String: Int] = [:]
         for bookmark in bookmarks {
+            let key = "\(bookmark.moduleId)_\(bookmark.showHref)"
+            if let stored = matchStore.match(moduleId: bookmark.moduleId, showHref: bookmark.showHref)?.anilistId {
+                idByKey[key] = stored
+            } else if let legacy = matchStore.legacyAniListID(showHref: bookmark.showHref) {
+                idByKey[key] = legacy
+            }
+        }
+
+        let unresolved = bookmarks.filter { idByKey["\($0.moduleId)_\($0.showHref)"] == nil }
+        for (index, bookmark) in unresolved.enumerated() {
+            progress = String(
+                format: NSLocalizedString("Matching %1$d of %2$d", comment: ""),
+                index + 1, unresolved.count
+            )
+            let found: Int? = await withCheckedContinuation { continuation in
+                AniListAiringSchedule.searchId(title: bookmark.title) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            guard let anilistId = found else { continue }
+            idByKey["\(bookmark.moduleId)_\(bookmark.showHref)"] = anilistId
+            matchStore.saveIfAbsent(
+                ProviderMatch(
+                    anilistId: anilistId,
+                    tmdbId: nil,
+                    tmdbType: nil,
+                    matchedAt: Date(),
+                    source: .auto
+                ),
+                moduleId: bookmark.moduleId,
+                showHref: bookmark.showHref
+            )
+        }
+
+        // 2. One batched request for every resolved id.
+        let dates: [Int: AniListLatestEpisode] = await withCheckedContinuation { continuation in
+            AniListAiringSchedule.latestAired(anilistIds: Array(idByKey.values)) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        // 2b. TMDB fallback for anything AniList could not match, which is
+        //     mostly non-anime shows AniList does not carry.
+        var tmdbDateByKey: [String: Date] = [:]
+        for bookmark in bookmarks {
+            let key = "\(bookmark.moduleId)_\(bookmark.showHref)"
+            guard idByKey[key] == nil else { continue }
+
             let stored = matchStore.match(moduleId: bookmark.moduleId, showHref: bookmark.showHref)
+            var tmdbId = stored?.tmdbId
+            var tmdbType = stored?.tmdbType ?? "tv"
 
-            if let anilistId = stored?.anilistId {
-                anilistIdToBookmark[anilistId] = bookmark
-            } else if let legacyId = matchStore.legacyAniListID(showHref: bookmark.showHref) {
-                // The app has persisted manual AniList matches as
-                // custom_anilist_id_<href> since before this store existed.
-                // Adopt it so already-matched shows work on the first refresh.
-                anilistIdToBookmark[legacyId] = bookmark
-                matchStore.saveIfAbsent(
-                    ProviderMatch(
-                        anilistId: legacyId,
-                        tmdbId: stored?.tmdbId,
-                        tmdbType: stored?.tmdbType,
-                        matchedAt: Date(),
-                        source: .manual
-                    ),
-                    moduleId: bookmark.moduleId,
-                    showHref: bookmark.showHref
-                )
-            } else if let tmdbId = stored?.tmdbId {
-                tmdbOnly.append((bookmark, tmdbId, stored?.tmdbType ?? "tv"))
-            } else {
-                unmatched.append(bookmark)
+            if tmdbId == nil {
+                let found: (Int?, TMDBFetcher.MediaType?) = await withCheckedContinuation { continuation in
+                    TMDBFetcher().fetchBestMatchID(for: bookmark.title) { id, type in
+                        continuation.resume(returning: (id, type))
+                    }
+                }
+                tmdbId = found.0
+                tmdbType = found.1?.rawValue ?? "tv"
+                if let id = tmdbId {
+                    matchStore.saveIfAbsent(
+                        ProviderMatch(
+                            anilistId: nil,
+                            tmdbId: id,
+                            tmdbType: tmdbType,
+                            matchedAt: Date(),
+                            source: .auto
+                        ),
+                        moduleId: bookmark.moduleId,
+                        showHref: bookmark.showHref
+                    )
+                }
+            }
+
+            guard let id = tmdbId else { continue }
+            let aired: (episodeNumber: Int, airDate: Date)? = await withCheckedContinuation { continuation in
+                TMDBAirDates.latestAired(tmdbId: id, mediaType: tmdbType) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            if let aired = aired {
+                tmdbDateByKey[key] = aired.airDate
             }
         }
 
-        var pending: [(bookmark: Bookmark, episodeNumber: Int, airDate: Date)] = []
-
-        if !anilistIdToBookmark.isEmpty {
-            let aired: [AiredEpisode] = await withCheckedContinuation { continuation in
-                AniListAiringSchedule.fetchRecentlyAired(
-                    anilistIds: Array(anilistIdToBookmark.keys),
-                    since: cutoff
-                ) { continuation.resume(returning: $0) }
-            }
-            for episode in aired {
-                guard let bookmark = anilistIdToBookmark[episode.anilistId] else { continue }
-                pending.append((bookmark, episode.episodeNumber, episode.airDate))
-            }
-        }
-
-        for entry in tmdbOnly {
-            let aired: [(episodeNumber: Int, airDate: Date)] = await withCheckedContinuation { continuation in
-                TMDBAirDates.fetchRecentlyAired(
-                    tmdbId: entry.tmdbId,
-                    mediaType: entry.tmdbType,
-                    since: cutoff
-                ) { continuation.resume(returning: $0) }
-            }
-            for episode in aired {
-                pending.append((entry.bookmark, episode.episodeNumber, episode.airDate))
-            }
-        }
-
+        // 3. Scrape each module for the latest episode number and its link.
+        //    Serialized by ModuleEpisodeScraper: JSController has one JSContext.
+        //    Published incrementally so rows appear as they resolve.
         var built: [LatestEpisodeEntry] = []
-
-        // Dated episodes: scrape to turn an episode number into a playable href.
-        for item in pending {
-            guard let module = moduleManager.modules.first(
-                where: { $0.id.uuidString == item.bookmark.moduleId }
-            ) else { continue }
-
-            let episodes = await ModuleEpisodeScraper.shared.episodes(
-                for: module,
-                showHref: item.bookmark.showHref
+        for (index, bookmark) in bookmarks.enumerated() {
+            progress = String(
+                format: NSLocalizedString("Checking %1$d of %2$d", comment: ""),
+                index + 1, bookmarks.count
             )
 
-            // Providers frequently report an episode as aired before the source
-            // site has uploaded it. Emit nothing rather than an untappable card;
-            // it will appear on a later refresh once the module lists it.
-            guard let episode = episodes.first(where: { $0.number == item.episodeNumber }) else {
-                Logger.shared.log(
-                    "Latest: \(item.bookmark.title) ep \(item.episodeNumber) aired but module has not listed it",
-                    type: "Latest"
-                )
-                continue
-            }
-
-            built.append(
-                LatestEpisodeEntry(
-                    showTitle: item.bookmark.title,
-                    imageUrl: item.bookmark.imageUrl,
-                    episodeNumber: episode.number,
-                    episodeHref: episode.href,
-                    showHref: item.bookmark.showHref,
-                    moduleId: item.bookmark.moduleId,
-                    airDate: item.airDate
-                )
-            )
-        }
-
-        // Unmatched shows: undated, detected by watermark diffing.
-        for bookmark in unmatched {
             guard let module = moduleManager.modules.first(
                 where: { $0.id.uuidString == bookmark.moduleId }
             ) else { continue }
@@ -188,59 +185,35 @@ final class LatestFeedManager: ObservableObject {
                 for: module,
                 showHref: bookmark.showHref
             )
-            guard let highest = episodes.map({ $0.number }).max() else { continue }
-
-            guard let lastSeen = LatestSeenStore.lastSeenNumber(
-                moduleId: bookmark.moduleId,
-                showHref: bookmark.showHref
-            ) else {
-                // First ever scan: baseline silently, or a long-running series
-                // would dump its entire back catalogue into the feed.
-                LatestSeenStore.record(
-                    moduleId: bookmark.moduleId,
-                    showHref: bookmark.showHref,
-                    highestNumber: highest
-                )
+            guard let latest = episodes.max(by: { $0.number < $1.number }) else {
+                Logger.shared.log("Latest: no episodes found for \(bookmark.title)", type: "Latest")
                 continue
             }
 
-            if highest > lastSeen {
-                for episode in episodes where episode.number > lastSeen {
-                    built.append(
-                        LatestEpisodeEntry(
-                            showTitle: bookmark.title,
-                            imageUrl: bookmark.imageUrl,
-                            episodeNumber: episode.number,
-                            episodeHref: episode.href,
-                            showHref: bookmark.showHref,
-                            moduleId: bookmark.moduleId,
-                            airDate: nil
-                        )
-                    )
-                }
-                LatestSeenStore.record(
-                    moduleId: bookmark.moduleId,
+            let key = "\(bookmark.moduleId)_\(bookmark.showHref)"
+            let airDate = idByKey[key].flatMap { dates[$0]?.airDate } ?? tmdbDateByKey[key]
+
+            built.append(
+                LatestEpisodeEntry(
+                    showTitle: bookmark.title,
+                    imageUrl: bookmark.imageUrl,
+                    episodeNumber: latest.number,
+                    episodeHref: latest.href,
                     showHref: bookmark.showHref,
-                    highestNumber: highest
+                    moduleId: bookmark.moduleId,
+                    airDate: airDate
                 )
-            }
+            )
+            entries = LatestFeedCache.sorted(built)
         }
 
-        // Merge with the cache so earlier discoveries survive until they age
-        // out. De-duplicated on module + episode href.
-        var merged = LatestFeedCache.load()
-        for entry in built where !merged.contains(where: {
-            $0.moduleId == entry.moduleId && $0.episodeHref == entry.episodeHref
-        }) {
-            merged.append(entry)
-        }
+        // The feed is rebuilt wholesale: one row per bookmark, no merging.
+        LatestFeedCache.save(built)
+        entries = LatestFeedCache.sorted(built)
 
-        let final = LatestFeedCache.prune(merged)
-        LatestFeedCache.save(final)
-        entries = final
-
+        let dated = built.filter { $0.airDate != nil }.count
         Logger.shared.log(
-            "Latest refresh complete: \(final.count) entries (\(built.count) new)",
+            "Latest refresh complete: \(built.count) shows, \(dated) with dates",
             type: "Latest"
         )
     }

@@ -20,8 +20,8 @@ struct LatestEpisodeCell: View {
             entry.episodeNumber
         )
         guard let airDate = entry.airDate else {
-            // No provider match: we know it is new, not when it aired.
-            return "\(episode) · \(NSLocalizedString("recently", comment: ""))"
+            // No AniList match, so the episode is known but its date is not.
+            return episode
         }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
@@ -52,15 +52,11 @@ struct LatestEpisodeCell: View {
             }
 
             Spacer(minLength: 8)
-
-            if !isWatched {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 10, height: 10)
-                    .accessibilityLabel(Text(NSLocalizedString("New", comment: "")))
-            }
         }
         .padding(.vertical, 6)
+        // Watched rows stay in the list but recede, so the feed always shows
+        // every library show while unwatched ones read as the live ones.
+        .opacity(isWatched ? 0.45 : 1)
         .contentShape(Rectangle())
         .contextMenu {
             if !isWatched {

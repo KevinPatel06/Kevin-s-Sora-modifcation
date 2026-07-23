@@ -7,6 +7,11 @@
 
 import Foundation
 
+/// One row in the Latest feed: a library show and its most recent episode.
+///
+/// The feed lists every bookmarked show, always. Watched entries are dimmed
+/// rather than hidden, so the tab never depends on what you have or have not
+/// watched to decide whether to show something.
 struct LatestEpisodeEntry: Codable, Identifiable {
     let id: UUID
     let showTitle: String
@@ -15,6 +20,7 @@ struct LatestEpisodeEntry: Codable, Identifiable {
     let episodeHref: String
     let showHref: String
     let moduleId: String
+    /// Most recent air date from AniList; nil when the show could not be matched.
     let airDate: Date?
     let discoveredAt: Date
 
@@ -40,12 +46,8 @@ struct LatestEpisodeEntry: Codable, Identifiable {
         self.discoveredAt = discoveredAt
     }
 
-    /// Used for sorting and for the 7-day window. Entries with no provider
-    /// match fall back to when this app first noticed them.
-    var effectiveDate: Date { airDate ?? discoveredAt }
-
     /// Derived from the same UserDefaults keys the episode list and players
-    /// already write, so "Mark as Watched" clears the NEW dot for free.
+    /// already write, so "Mark as Watched" dims the row for free.
     /// Threshold matches the existing 0.9 used across LibraryView.
     var isWatched: Bool {
         let last = UserDefaults.standard.double(forKey: "lastPlayedTime_\(episodeHref)")
@@ -58,61 +60,37 @@ struct LatestEpisodeEntry: Codable, Identifiable {
 /// Persists the last built feed so the tab renders instantly and works offline.
 enum LatestFeedCache {
     private static let key = "latestFeed"
-    static let windowDays = 7
 
     static func load() -> [LatestEpisodeEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let entries = try? JSONDecoder().decode([LatestEpisodeEntry].self, from: data) else {
             return []
         }
-        return prune(entries)
+        return sorted(entries)
     }
 
     static func save(_ entries: [LatestEpisodeEntry]) {
-        let pruned = prune(entries)
-        guard let data = try? JSONEncoder().encode(pruned) else {
+        guard let data = try? JSONEncoder().encode(sorted(entries)) else {
             Logger.shared.log("Failed to encode latest feed", type: "Error")
             return
         }
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    /// Drops anything outside the window and returns newest first.
-    static func prune(_ entries: [LatestEpisodeEntry]) -> [LatestEpisodeEntry] {
-        guard let cutoff = Calendar.current.date(byAdding: .day, value: -windowDays, to: Date()) else {
-            return entries
+    /// Newest first. Shows with no resolved date sort last rather than being
+    /// dropped, so an unmatched show is still reachable in the feed.
+    static func sorted(_ entries: [LatestEpisodeEntry]) -> [LatestEpisodeEntry] {
+        entries.sorted { lhs, rhs in
+            switch (lhs.airDate, rhs.airDate) {
+            case let (l?, r?): return l > r
+            case (_?, nil):    return true
+            case (nil, _?):    return false
+            case (nil, nil):   return lhs.showTitle.localizedCaseInsensitiveCompare(rhs.showTitle) == .orderedAscending
+            }
         }
-        return entries
-            .filter { $0.effectiveDate >= cutoff }
-            .sorted { $0.effectiveDate > $1.effectiveDate }
     }
 
     static func removeEntries(moduleId: String) {
         save(load().filter { $0.moduleId != moduleId })
-    }
-}
-
-/// Highest episode number seen per show. Only used for shows matching no provider.
-enum LatestSeenStore {
-    private static func key(moduleId: String, showHref: String) -> String {
-        "latestSeen_\(moduleId)_\(showHref)"
-    }
-
-    /// `nil` means this show has never been scanned, so the caller must baseline
-    /// it silently instead of emitting its entire back catalogue as "new".
-    static func lastSeenNumber(moduleId: String, showHref: String) -> Int? {
-        let dict = UserDefaults.standard.dictionary(forKey: key(moduleId: moduleId, showHref: showHref))
-        return dict?["lastNumber"] as? Int
-    }
-
-    static func record(moduleId: String, showHref: String, highestNumber: Int) {
-        UserDefaults.standard.set(
-            ["lastNumber": highestNumber, "checkedAt": Date().timeIntervalSince1970],
-            forKey: key(moduleId: moduleId, showHref: showHref)
-        )
-    }
-
-    static func clear(moduleId: String, showHref: String) {
-        UserDefaults.standard.removeObject(forKey: key(moduleId: moduleId, showHref: showHref))
     }
 }

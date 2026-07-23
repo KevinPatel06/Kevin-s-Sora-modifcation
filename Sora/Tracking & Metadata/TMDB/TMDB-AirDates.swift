@@ -7,30 +7,32 @@
 
 import Foundation
 
-/// Air-date lookup used as a fallback when a show has no AniList match.
+/// Air-date lookup used as a fallback when a show has no AniList match,
+/// which is mainly non-anime shows AniList does not carry.
 enum TMDBAirDates {
-    static func fetchRecentlyAired(
+    /// The most recently aired episode of a TV show, or nil for movies and
+    /// anything TMDB has no air date for.
+    static func latestAired(
         tmdbId: Int,
         mediaType: String,
-        since: Date,
-        completion: @escaping ([(episodeNumber: Int, airDate: Date)]) -> Void
+        completion: @escaping ((episodeNumber: Int, airDate: Date)?) -> Void
     ) {
         // Movies have no episodes.
         guard mediaType == "tv" else {
-            completion([])
+            completion(nil)
             return
         }
 
         let apiKey = TMDBFetcher().apiKey
         guard let url = URL(string: "https://api.themoviedb.org/3/tv/\(tmdbId)?api_key=\(apiKey)") else {
-            completion([])
+            completion(nil)
             return
         }
 
         URLSession.custom.dataTask(with: url) { data, _, error in
             if let error = error {
                 Logger.shared.log("TMDB air-date lookup failed: \(error.localizedDescription)", type: "Error")
-                completion([])
+                completion(nil)
                 return
             }
 
@@ -39,7 +41,7 @@ enum TMDBAirDates {
                   let last = json["last_episode_to_air"] as? [String: Any],
                   let episodeNumber = last["episode_number"] as? Int,
                   let airDateString = last["air_date"] as? String else {
-                completion([])
+                completion(nil)
                 return
             }
 
@@ -50,13 +52,13 @@ enum TMDBAirDates {
             formatter.timeZone = TimeZone(identifier: "UTC")
             formatter.locale = Locale(identifier: "en_US_POSIX")
 
-            guard let airDate = formatter.date(from: airDateString), airDate >= since else {
-                completion([])
+            guard let airDate = formatter.date(from: airDateString) else {
+                completion(nil)
                 return
             }
 
-            Logger.shared.log("TMDB reports tv/\(tmdbId) episode \(episodeNumber) aired \(airDateString)", type: "Latest")
-            completion([(episodeNumber: episodeNumber, airDate: airDate)])
+            Logger.shared.log("TMDB tv/\(tmdbId) latest episode \(episodeNumber) aired \(airDateString)", type: "Latest")
+            completion((episodeNumber: episodeNumber, airDate: airDate))
         }.resume()
     }
 }

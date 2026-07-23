@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-23-latest-episodes-tab-design.md`
 
+> **Historical.** Tasks 1-8 were executed as written, then the design was
+> revised during device testing. See the Amendment at the top of the spec for
+> what actually shipped: no 7-day window, no watermarks, one row per show,
+> watched rows dimmed rather than filtered.
+
 ---
 
 ## ⚠️ Verification model — read before starting

@@ -1,7 +1,39 @@
 # Latest Episodes Tab — Design
 
 **Date:** 2026-07-23
-**Status:** Approved, ready for implementation planning
+**Status:** Shipped and verified on device
+
+> ## Amendment — what actually shipped
+>
+> The design below was superseded during implementation. It is kept for the
+> reasoning trail; **the sections marked ~~struck~~ did not ship.**
+>
+> Two faults made the original design produce a permanently empty feed:
+>
+> 1. **The AniList query was invalid.** `airingAt_greater` / `airingAt_lesser`
+>    are arguments of the top-level `Page.airingSchedules` query, not of the
+>    nested `Media.airingSchedule` field. AniList rejected every request and
+>    returned `data: null`, so no dated entry could ever be built. This
+>    compiled cleanly and was invisible to CI.
+> 2. **Watermark baselining silenced everything else.** Unmatched shows record
+>    their episode count silently on first scan, so a first refresh emitted
+>    nothing for them by design.
+>
+> **As shipped:**
+>
+> - **One row per library show, always shown** — no 7-day window, no watermark,
+>   no filtering. A show appears even when no provider matched it; it simply
+>   shows an episode number without a date.
+> - **Watched rows dim to 45%** rather than being hidden, so the feed never
+>   depends on watch state to have content.
+> - **Dates** resolve via stored AniList id → the app's pre-existing
+>   `custom_anilist_id_<href>` → fuzzy title search → TMDB. Shows older than
+>   AniList's airing data fall back to the show's end date.
+> - **Every bookmark is scraped each refresh**, not just recently-aired ones,
+>   because dimming needs each episode's link. Scrapes are serialized and
+>   bounded at 25s each, with incremental publishing and a progress counter.
+>
+> Verified on device 2026-07-23: correct episodes, correct sort order.
 
 ## Goal
 
@@ -26,9 +58,9 @@ Modules report episodes as `{number, href}` only. No air date exists anywhere in
 | Module scoping | None — feed spans all modules | Follows from library-derived source |
 | Recency, primary | AniList `airingSchedule` | Real per-episode air timestamps; best coverage for anime |
 | Recency, fallback | TMDB air dates | Covers shows/movies AniList lacks |
-| Recency, no match | Local first-seen watermark, displayed as "recently" | Maximizes coverage; accepted trade-off that these entries carry no 7-day guarantee |
+| ~~Recency, no match~~ | ~~Local first-seen watermark~~ | **Did not ship.** Shows with no match now appear with an episode number and no date. |
 | Refresh trigger | Pull-to-refresh only | No refresh on tab open; user controls when network work happens |
-| Refresh strategy | Providers first, scrape only what aired | Reduces a 20-bookmark refresh from 20 scrapes to ~2 provider calls plus ~3 scrapes |
+| ~~Refresh strategy~~ | ~~Providers first, scrape only what aired~~ | **Did not ship.** Every bookmark is scraped, because watched-dimming needs each episode link. |
 | Match persistence | Side table, written at bookmark time | The ID is already resolved in `MediaInfoView`; persisting avoids repeated fuzzy title matching |
 | Tap behavior | Opens `MediaInfoView` at that episode | Mirrors existing `LibraryView` interaction |
 | Long-press | Play Now, Mark as Watched | Mirrors existing `LibraryView` context menu |
@@ -39,7 +71,7 @@ Modules report episodes as `{number, href}` only. No air date exists anywhere in
 
 All module scraping performed by this feature must therefore be serialized through an actor. This is acceptable only because the provider-first strategy reduces the number of scrapes per refresh to a handful. If the design ever reverts to scraping every bookmark, this constraint becomes a minute-long serial queue.
 
-## Data model
+## Data model (see Amendment: watermarks removed, window removed)
 
 Three new stores, all `UserDefaults`, consistent with the app's existing persistence idiom.
 
@@ -82,7 +114,7 @@ struct LatestEpisodeEntry: Codable, Identifiable {
 
 Pruned to the 7-day window on load. The tab renders instantly and works offline from this cache.
 
-### First-seen watermarks
+### ~~First-seen watermarks~~ (did not ship)
 
 Key: `latestSeen_<moduleId>_<showHref>` → highest episode number observed, plus timestamp.
 

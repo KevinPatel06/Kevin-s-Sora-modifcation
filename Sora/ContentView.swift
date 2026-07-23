@@ -13,6 +13,7 @@ struct ContentView_Previews: PreviewProvider {
             .environmentObject(LibraryManager())
             .environmentObject(ModuleManager())
             .environmentObject(Settings())
+            .environmentObject(LatestFeedManager())
     }
 }
 
@@ -26,18 +27,22 @@ struct ContentView: View {
     @State private var tabBarVisible: Bool = true
     @State private var lastHideTime: Date = Date()
     
+    // The index in `tabs` and the case in `tabView(for:)` must stay in lockstep.
+    // A mismatch compiles cleanly and silently shows the wrong screen.
     let tabs: [TabItem] = [
         TabItem(icon: "square.stack", title: NSLocalizedString("LibraryTab", comment: "")),
+        TabItem(icon: "sparkles", title: NSLocalizedString("LatestTab", comment: "")),
         TabItem(icon: "arrow.down.circle", title: NSLocalizedString("DownloadsTab", comment: "")),
         TabItem(icon: "gearshape", title: NSLocalizedString("SettingsTab", comment: "")),
         TabItem(icon: "magnifyingglass", title: NSLocalizedString("SearchTab", comment: ""))
     ]
-    
+
     private func tabView(for index: Int) -> some View {
         switch index {
-        case 1: return AnyView(DownloadView())
-        case 2: return AnyView(SettingsView())
-        case 3: return AnyView(SearchView(searchQuery: $searchQuery))
+        case 1: return AnyView(LatestView())
+        case 2: return AnyView(DownloadView())
+        case 3: return AnyView(SettingsView())
+        case 4: return AnyView(SearchView(searchQuery: $searchQuery))
         default: return AnyView(LibraryView())
         }
     }

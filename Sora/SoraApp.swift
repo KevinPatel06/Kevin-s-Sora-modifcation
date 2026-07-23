@@ -14,6 +14,7 @@ struct SoraApp: App {
     @StateObject private var libraryManager = LibraryManager()
     @StateObject private var downloadManager = DownloadManager()
     @StateObject private var jsController = JSController.shared
+    @StateObject private var latestFeedManager = LatestFeedManager()
     
     init() {
         if let userAccentColor = UserDefaults.standard.color(forKey: "accentColor") {
@@ -36,6 +37,7 @@ struct SoraApp: App {
             .environmentObject(libraryManager)
             .environmentObject(downloadManager)
             .environmentObject(jsController)
+            .environmentObject(latestFeedManager)
             .accentColor(settings.accentColor)
             .onAppear {
                 settings.updateAppearance()

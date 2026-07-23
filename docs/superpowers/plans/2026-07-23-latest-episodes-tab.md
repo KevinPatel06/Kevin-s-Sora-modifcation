@@ -49,7 +49,7 @@ Adding an XCTest target would enable real unit tests for the pure-logic pieces (
 
 | Path | Responsibility |
 |---|---|
-| `Sora/Tracking & Metadata/ProviderMatchStore.swift` | Persist and read AniList/TMDB IDs per bookmark |
+| `Sora/Utlis & Misc/Models/ProviderMatchStore.swift` | Persist and read AniList/TMDB IDs per bookmark |
 | `Sora/Tracking & Metadata/AniList/AniListAiringSchedule.swift` | Batched airing-schedule GraphQL query |
 | `Sora/Tracking & Metadata/TMDB/TMDB-AirDates.swift` | TMDB air-date lookup fallback |
 | `Sora/Views/LatestView/LatestEpisodeEntry.swift` | Feed entry model, watched derivation, feed cache |
@@ -75,7 +75,7 @@ Adding an XCTest target would enable real unit tests for the pure-logic pieces (
 Persists which AniList/TMDB entry a bookmark corresponds to, so refreshes never re-run fuzzy title matching.
 
 **Files:**
-- Create: `Sora/Tracking & Metadata/ProviderMatchStore.swift`
+- Create: `Sora/Utlis & Misc/Models/ProviderMatchStore.swift`
 - Modify: `Sora/Views/MediaInfoView/MediaInfoView.swift:1060-1068`
 - Modify: `Sulfur.xcodeproj/project.pbxproj`
 
@@ -85,7 +85,7 @@ Persists which AniList/TMDB entry a bookmark corresponds to, so refreshes never 
 
 - [ ] **Step 1: Create the store**
 
-Create `Sora/Tracking & Metadata/ProviderMatchStore.swift`:
+Create `Sora/Utlis & Misc/Models/ProviderMatchStore.swift`:
 
 ```swift
 //
@@ -247,7 +247,7 @@ In `Sulfur.xcodeproj/project.pbxproj`, add four entries for `ProviderMatchStore.
 
 1. `PBXBuildFile` section: `<BUILD_ID> /* ProviderMatchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = <FILE_ID> /* ProviderMatchStore.swift */; };`
 2. `PBXFileReference` section: `<FILE_ID> /* ProviderMatchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMatchStore.swift; sourceTree = "<group>"; };`
-3. The `Tracking & Metadata` `PBXGroup` `children` array: `<FILE_ID> /* ProviderMatchStore.swift */,`
+3. The `Models` `PBXGroup` `children` array: `<FILE_ID> /* ProviderMatchStore.swift */,`
 4. The `Sulfur` target's `PBXSourcesBuildPhase` `files` array: `<BUILD_ID> /* ProviderMatchStore.swift in Sources */,`
 
 - [ ] **Step 5: Self-review**
@@ -261,7 +261,7 @@ In `Sulfur.xcodeproj/project.pbxproj`, add four entries for `ProviderMatchStore.
 - [ ] **Step 6: Commit and verify CI**
 
 ```bash
-git add "Sora/Tracking & Metadata/ProviderMatchStore.swift" \
+git add "Sora/Utlis & Misc/Models/ProviderMatchStore.swift" \
         "Sora/Views/MediaInfoView/MediaInfoView.swift" \
         Sulfur.xcodeproj/project.pbxproj
 git commit -m "Add provider match store, persisted at bookmark time"

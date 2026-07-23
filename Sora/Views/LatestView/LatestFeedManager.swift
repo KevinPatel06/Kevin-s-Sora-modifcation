@@ -71,7 +71,12 @@ final class LatestFeedManager: ObservableObject {
         }
 
         let bookmarks = uniqueBookmarks(from: libraryManager)
+        Logger.shared.log(
+            "Latest: starting refresh — \(libraryManager.collections.count) collections, \(bookmarks.count) unique bookmarks, \(moduleManager.modules.count) modules installed",
+            type: "Latest"
+        )
         guard !bookmarks.isEmpty else {
+            Logger.shared.log("Latest: no bookmarks found, nothing to build", type: "Latest")
             entries = []
             LatestFeedCache.save([])
             return
@@ -179,14 +184,24 @@ final class LatestFeedManager: ObservableObject {
 
             guard let module = moduleManager.modules.first(
                 where: { $0.id.uuidString == bookmark.moduleId }
-            ) else { continue }
+            ) else {
+                // The bookmark names a module that is no longer installed.
+                Logger.shared.log(
+                    "Latest: skipping \(bookmark.title) — no installed module matches id \(bookmark.moduleId)",
+                    type: "Latest"
+                )
+                continue
+            }
 
             let episodes = await ModuleEpisodeScraper.shared.episodes(
                 for: module,
                 showHref: bookmark.showHref
             )
             guard let latest = episodes.max(by: { $0.number < $1.number }) else {
-                Logger.shared.log("Latest: no episodes found for \(bookmark.title)", type: "Latest")
+                Logger.shared.log(
+                    "Latest: \(bookmark.title) returned 0 episodes from \(module.metadata.sourceName)",
+                    type: "Latest"
+                )
                 continue
             }
 

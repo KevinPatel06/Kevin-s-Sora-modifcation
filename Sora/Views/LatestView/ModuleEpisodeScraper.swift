@@ -41,23 +41,41 @@ actor ModuleEpisodeScraper {
             DispatchQueue.main.async {
                 JSController.shared.loadScript(jsContent)
 
-                // fetchDetailsJS has a 15s timeout path in addition to its
-                // then/catch blocks. Resuming a continuation twice is a hard
-                // crash, so this guard is mandatory rather than defensive.
+                // Resuming a continuation twice is a hard crash, and there are
+                // three racing paths here: then, catch, and our own timeout.
+                let lock = NSLock()
                 var didResume = false
-                let resumeOnce: ([EpisodeLink]) -> Void = { episodes in
-                    guard !didResume else { return }
+                let resumeOnce: (String, [EpisodeLink]) -> Void = { reason, episodes in
+                    lock.lock()
+                    let alreadyResumed = didResume
                     didResume = true
+                    lock.unlock()
+                    guard !alreadyResumed else { return }
+                    if reason == "timeout" {
+                        Logger.shared.log(
+                            "Latest: scrape timed out for \(module.metadata.sourceName) — \(showHref)",
+                            type: "Latest"
+                        )
+                    }
                     continuation.resume(returning: episodes)
+                }
+
+                // JSController.fetchDetailsJS waits on a DispatchGroup covering
+                // both extractDetails and extractEpisodes, but only the episodes
+                // half has a timeout. A module whose extractDetails promise
+                // never settles would hang this loop forever, so we impose our
+                // own ceiling and move on to the next show.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+                    resumeOnce("timeout", [])
                 }
 
                 if module.metadata.asyncJS == true {
                     JSController.shared.fetchDetailsJS(url: showHref) { _, episodes in
-                        resumeOnce(episodes)
+                        resumeOnce("done", episodes)
                     }
                 } else {
                     JSController.shared.fetchDetails(url: showHref) { _, episodes in
-                        resumeOnce(episodes)
+                        resumeOnce("done", episodes)
                     }
                 }
             }

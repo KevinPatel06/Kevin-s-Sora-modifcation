@@ -1,2 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts run on the macOS CI runner - they must keep LF endings,
+# or bash fails with "bad interpreter: /bin/bash^M".
+*.sh text eol=lf
+
+# Xcode project files are merge-hostile; never let Git rewrite them.
+*.pbxproj -text merge=union

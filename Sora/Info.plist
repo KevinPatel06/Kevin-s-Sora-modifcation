@@ -32,7 +32,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>me.cranci.scheme</string>
+			<string>com.kevinpatel.scheme</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>sora</string>

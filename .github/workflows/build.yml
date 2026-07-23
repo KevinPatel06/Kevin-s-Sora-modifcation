@@ -2,11 +2,10 @@ name: Build
 on:
   push:
     branches:
+      - main
       - dev
-  pull_request:
-    branches:
-      - dev
-      
+  workflow_dispatch:
+
 jobs:
   build-ios:
     name: Build IPA
@@ -41,6 +40,8 @@ jobs:
   build-macos:
     name: Build macOS App
     runs-on: macos-latest
+    # Mac Catalyst build is not needed for LiveContainer. Manual runs only.
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repository

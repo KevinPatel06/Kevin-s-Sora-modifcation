@@ -95,6 +95,7 @@
 		138AA1B92D2D66FD0021F9DF /* CircularProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138AA1B72D2D66FD0021F9DF /* CircularProgressBar.swift */; };
 		138B66A02E0BEA52009BE8D9 /* WebAuthenticationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138B669F2E0BEA52009BE8D9 /* WebAuthenticationManager.swift */; };
 		138FE1D02DECA00D00936D81 /* TMDB-FetchID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138FE1CF2DECA00D00936D81 /* TMDB-FetchID.swift */; };
+		AA30C0DE2DE10C400003A002 /* TMDB-AirDates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA30C0DE2DE10C400003A001 /* TMDB-AirDates.swift */; };
 		1398FB3F2DE4E161004D3F5F /* SettingsViewAbout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1398FB3E2DE4E161004D3F5F /* SettingsViewAbout.swift */; };
 		139935662D468C450065CEFF /* ModuleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139935652D468C450065CEFF /* ModuleManager.swift */; };
 		1399FAD42D3AB38C00E97C31 /* SettingsViewLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1399FAD32D3AB38C00E97C31 /* SettingsViewLogger.swift */; };
@@ -109,6 +110,7 @@
 		13D99CF72D4E73C300250A86 /* ModuleAdditionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D99CF62D4E73C300250A86 /* ModuleAdditionSettingsView.swift */; };
 		13DB468D2D90093A008CBC03 /* Anilist-Login.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB468B2D900939008CBC03 /* Anilist-Login.swift */; };
 		13DB468E2D90093A008CBC03 /* Anilist-Token.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB468C2D90093A008CBC03 /* Anilist-Token.swift */; };
+		AA20C0DE2DE10C400002A002 /* AniListAiringSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA20C0DE2DE10C400002A001 /* AniListAiringSchedule.swift */; };
 		13DB46902D900A38008CBC03 /* URL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB468F2D900A38008CBC03 /* URL.swift */; };
 		13DB46922D900BCE008CBC03 /* SettingsViewTrackers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB46912D900BCE008CBC03 /* SettingsViewTrackers.swift */; };
 		13DB7CC32D7D99C0004371D3 /* SubtitleSettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DB7CC22D7D99C0004371D3 /* SubtitleSettingsManager.swift */; };
@@ -227,6 +229,7 @@
 		138AA1B72D2D66FD0021F9DF /* CircularProgressBar.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CircularProgressBar.swift; sourceTree = "<group>"; };
 		138B669F2E0BEA52009BE8D9 /* WebAuthenticationManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WebAuthenticationManager.swift; sourceTree = "<group>"; };
 		138FE1CF2DECA00D00936D81 /* TMDB-FetchID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TMDB-FetchID.swift"; sourceTree = "<group>"; };
+		AA30C0DE2DE10C400003A001 /* TMDB-AirDates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TMDB-AirDates.swift"; sourceTree = "<group>"; };
 		1398FB3E2DE4E161004D3F5F /* SettingsViewAbout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewAbout.swift; sourceTree = "<group>"; };
 		139935652D468C450065CEFF /* ModuleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleManager.swift; sourceTree = "<group>"; };
 		1399FAD32D3AB38C00E97C31 /* SettingsViewLogger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SettingsViewLogger.swift; sourceTree = "<group>"; };
@@ -241,6 +244,7 @@
 		13D99CF62D4E73C300250A86 /* ModuleAdditionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleAdditionSettingsView.swift; sourceTree = "<group>"; };
 		13DB468B2D900939008CBC03 /* Anilist-Login.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "Anilist-Login.swift"; sourceTree = "<group>"; };
 		13DB468C2D90093A008CBC03 /* Anilist-Token.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "Anilist-Token.swift"; sourceTree = "<group>"; };
+		AA20C0DE2DE10C400002A001 /* AniListAiringSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AniListAiringSchedule.swift; sourceTree = "<group>"; };
 		13DB468F2D900A38008CBC03 /* URL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URL.swift; sourceTree = "<group>"; };
 		13DB46912D900BCE008CBC03 /* SettingsViewTrackers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewTrackers.swift; sourceTree = "<group>"; };
 		13DB7CC22D7D99C0004371D3 /* SubtitleSettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleSettingsManager.swift; sourceTree = "<group>"; };
@@ -812,6 +816,7 @@
 			children = (
 				146A48DD2F02F1930017D145 /* IntroDB-FetchIntro.swift */,
 				138FE1CF2DECA00D00936D81 /* TMDB-FetchID.swift */,
+				AA30C0DE2DE10C400003A001 /* TMDB-AirDates.swift */,
 			);
 			path = TMDB;
 			sourceTree = "<group>";
@@ -865,6 +870,7 @@
 			children = (
 				13DB468B2D900939008CBC03 /* Anilist-Login.swift */,
 				13DB468C2D90093A008CBC03 /* Anilist-Token.swift */,
+				AA20C0DE2DE10C400002A001 /* AniListAiringSchedule.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -1088,6 +1094,7 @@
 				13DB46902D900A38008CBC03 /* URL.swift in Sources */,
 				0414ED052E32D90000A7E76A /* SettingsViewLibrary.swift in Sources */,
 				138FE1D02DECA00D00936D81 /* TMDB-FetchID.swift in Sources */,
+				AA30C0DE2DE10C400003A002 /* TMDB-AirDates.swift in Sources */,
 				04AD07162E03704700EB74C1 /* BookmarkCell.swift in Sources */,
 				130C6BFA2D53AB1F00DC1432 /* SettingsViewData.swift in Sources */,
 				0402DA172DE7B7B8003BB42C /* SearchViewComponents.swift in Sources */,
@@ -1125,6 +1132,7 @@
 				04AD07122E0360CD00EB74C1 /* CollectionPickerView.swift in Sources */,
 				133CF6A62DFEBE9000BD13F9 /* VideoWatchingActivity.swift in Sources */,
 				13DB468E2D90093A008CBC03 /* Anilist-Token.swift in Sources */,
+				AA20C0DE2DE10C400002A002 /* AniListAiringSchedule.swift in Sources */,
 				1EAC7A322D888BC50083984D /* MusicProgressSlider.swift in Sources */,
 				722248632DCBAA4700CABE2D /* JSController-HeaderManager.swift in Sources */,
 				133D7C942D2BE2640075467E /* JSController.swift in Sources */,

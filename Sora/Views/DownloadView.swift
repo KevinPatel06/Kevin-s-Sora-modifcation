@@ -8,6 +8,7 @@
 import AVKit
 import NukeUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DownloadView: View {
     @EnvironmentObject var jsController: JSController
@@ -18,7 +19,14 @@ struct DownloadView: View {
     @State private var assetToDelete: DownloadedAsset?
     @State private var isSearchActive = false
     @State private var showDeleteAllAlert = false
-    
+
+    @StateObject private var exporter = DownloadExporter()
+    @State private var isSelectingForExport = false
+    @State private var selectedShowTitles: Set<String> = []
+    @State private var showFolderPicker = false
+    @State private var exportSummary: ExportSummary?
+    @State private var exportErrorMessage: String?
+
     enum SortOption: String, CaseIterable, Identifiable {
         case newest = "Newest"
         case oldest = "Oldest"
@@ -51,14 +59,57 @@ struct DownloadView: View {
                         searchText: $searchText,
                         isSearchActive: $isSearchActive,
                         sortOption: $sortOption,
-                        showSortMenu: selectedTab == 1 && !jsController.savedAssets.isEmpty
+                        showSortMenu: selectedTab == 1 && !jsController.savedAssets.isEmpty,
+                        showExportMenu: selectedTab == 1 && !jsController.savedAssets.isEmpty && !isSelectingForExport,
+                        hasExportDestination: exporter.hasDestination,
+                        onStartExportSelection: {
+                            selectedShowTitles = []
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isSelectingForExport = true
+                            }
+                        },
+                        onChangeExportFolder: { showFolderPicker = true }
                     )
+
+                    if isSelectingForExport {
+                        exportSelectionBar
+                    }
+
                     Divider()
                 }
                 .background(.ultraThinMaterial)
             }
             .navigationBarHidden(true)
             .animation(.easeInOut(duration: 0.2), value: selectedTab)
+            .onChange(of: selectedTab) { _ in
+                if selectedTab != 1 { cancelExportSelection() }
+            }
+            .overlay {
+                if let progress = exporter.progress {
+                    ExportProgressOverlay(progress: progress)
+                }
+            }
+            .fileImporter(
+                isPresented: $showFolderPicker,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                handleFolderPick(result)
+            }
+            .alert(NSLocalizedString("Export Finished", comment: ""), isPresented: exportSummaryBinding) {
+                Button(NSLocalizedString("OK", comment: ""), role: .cancel) { exportSummary = nil }
+            } message: {
+                if let summary = exportSummary {
+                    Text(exportSummaryMessage(summary))
+                }
+            }
+            .alert(NSLocalizedString("Export Failed", comment: ""), isPresented: exportErrorBinding) {
+                Button(NSLocalizedString("OK", comment: ""), role: .cancel) { exportErrorMessage = nil }
+            } message: {
+                if let message = exportErrorMessage {
+                    Text(message)
+                }
+            }
             .alert(NSLocalizedString("Delete Download", comment: ""), isPresented: $showDeleteAlert) {
                 Button(NSLocalizedString("Delete", comment: ""), role: .destructive) {
                     if let asset = assetToDelete {
@@ -121,6 +172,9 @@ struct DownloadView: View {
 
                         DownloadedSection(
                             groups: groupedAssets,
+                            isSelecting: isSelectingForExport,
+                            selectedTitles: selectedShowTitles,
+                            onToggleSelection: toggleShowSelection,
                             onDelete: { asset in
                                 assetToDelete = asset
                                 showDeleteAlert = true
@@ -141,6 +195,149 @@ struct DownloadView: View {
         }
     }
     
+    // MARK: - Export
+
+    private var exportSelectionBar: some View {
+        HStack(spacing: 12) {
+            Button(action: toggleSelectAll) {
+                Text(allShowsSelected
+                     ? NSLocalizedString("Deselect All", comment: "")
+                     : NSLocalizedString("Select All", comment: ""))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+
+            Spacer()
+
+            Button(action: cancelExportSelection) {
+                Text(NSLocalizedString("Cancel", comment: ""))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(action: startExport) {
+                Text(String(format: NSLocalizedString("Export (%d)", comment: ""), selectedShowTitles.count))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule().fill(selectedShowTitles.isEmpty ? Color.gray : Color.accentColor)
+                    )
+            }
+            .disabled(selectedShowTitles.isEmpty)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
+    }
+
+    private var allShowsSelected: Bool {
+        !groupedAssets.isEmpty && selectedShowTitles.count == groupedAssets.count
+    }
+
+    private var exportSummaryBinding: Binding<Bool> {
+        Binding(get: { exportSummary != nil }, set: { if !$0 { exportSummary = nil } })
+    }
+
+    private var exportErrorBinding: Binding<Bool> {
+        Binding(get: { exportErrorMessage != nil }, set: { if !$0 { exportErrorMessage = nil } })
+    }
+
+    private func toggleShowSelection(_ title: String) {
+        if selectedShowTitles.contains(title) {
+            selectedShowTitles.remove(title)
+        } else {
+            selectedShowTitles.insert(title)
+        }
+    }
+
+    private func toggleSelectAll() {
+        selectedShowTitles = allShowsSelected ? [] : Set(groupedAssets.map { $0.title })
+    }
+
+    private func cancelExportSelection() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isSelectingForExport = false
+        }
+        selectedShowTitles = []
+    }
+
+    private func startExport() {
+        guard !selectedShowTitles.isEmpty else { return }
+
+        // First export needs a destination; the picker resumes the export itself.
+        guard exporter.hasDestination else {
+            showFolderPicker = true
+            return
+        }
+
+        runExport()
+    }
+
+    private func runExport() {
+        let shows = groupedAssets
+            .filter { selectedShowTitles.contains($0.title) }
+            .map { (title: $0.title, assets: $0.assets) }
+
+        guard !shows.isEmpty else { return }
+
+        Task {
+            do {
+                let summary = try await exporter.export(shows: shows)
+                cancelExportSelection()
+                exportSummary = summary
+                DropManager.shared.showDrop(
+                    title: String(format: NSLocalizedString("Exported %d episodes", comment: ""), summary.exported),
+                    subtitle: "",
+                    duration: 2.0,
+                    icon: UIImage(systemName: "square.and.arrow.up")
+                )
+            } catch {
+                exportErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func handleFolderPick(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            do {
+                try exporter.saveDestination(url)
+                // Picking a folder mid-export is the user confirming where to put things.
+                if isSelectingForExport && !selectedShowTitles.isEmpty {
+                    runExport()
+                }
+            } catch {
+                exportErrorMessage = error.localizedDescription
+            }
+        case .failure(let error):
+            Logger.shared.log("Export folder pick failed: \(error.localizedDescription)", type: "Error")
+        }
+    }
+
+    private func exportSummaryMessage(_ summary: ExportSummary) -> String {
+        var lines: [String] = []
+        lines.append(String(format: NSLocalizedString("%d episodes copied to %@", comment: ""),
+                            summary.exported, summary.destinationPath))
+
+        if summary.skippedExisting > 0 {
+            lines.append(String(format: NSLocalizedString("%d already in the folder", comment: ""),
+                                summary.skippedExisting))
+        }
+        if summary.skippedHLS > 0 {
+            lines.append(String(format: NSLocalizedString("%d skipped — streamed (HLS) downloads can't be exported as playable files", comment: ""),
+                                summary.skippedHLS))
+        }
+        if summary.failed > 0 {
+            lines.append(String(format: NSLocalizedString("%d failed — see the logs for details", comment: ""),
+                                summary.failed))
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     private var emptyActiveDownloadsView: some View {
         VStack(spacing: 20) {
             Image(systemName: "arrow.down.circle")
@@ -302,7 +499,11 @@ struct CustomDownloadHeader: View {
     @Binding var isSearchActive: Bool
     @Binding var sortOption: DownloadView.SortOption
     let showSortMenu: Bool
-    
+    let showExportMenu: Bool
+    let hasExportDestination: Bool
+    let onStartExportSelection: () -> Void
+    let onChangeExportFolder: () -> Void
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -334,6 +535,34 @@ struct CustomDownloadHeader: View {
                                     .shadow(color: .accentColor.opacity(0.2), radius: 2)
                             )
                             .circularGradientOutline()
+                    }
+
+                    if showExportMenu {
+                        Menu {
+                            Button(action: onStartExportSelection) {
+                                Label(NSLocalizedString("Export Shows…", comment: ""),
+                                      systemImage: "square.and.arrow.up")
+                            }
+                            Button(action: onChangeExportFolder) {
+                                Label(hasExportDestination
+                                      ? NSLocalizedString("Change Export Folder…", comment: "")
+                                      : NSLocalizedString("Choose Export Folder…", comment: ""),
+                                      systemImage: "folder")
+                            }
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 18, height: 18)
+                                .foregroundColor(.accentColor)
+                                .padding(10)
+                                .background(
+                                    Circle()
+                                        .fill(Color.gray.opacity(0.2))
+                                        .shadow(color: .accentColor.opacity(0.2), radius: 2)
+                                )
+                                .circularGradientOutline()
+                        }
                     }
 
                     if showSortMenu {
@@ -506,6 +735,42 @@ struct SimpleDownloadGroup {
     }
 }
 
+struct ExportProgressOverlay: View {
+    let progress: ExportProgress
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.2)
+
+                Text(NSLocalizedString("Exporting…", comment: ""))
+                    .font(.headline)
+
+                Text("\(progress.current) / \(progress.total)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                if !progress.name.isEmpty {
+                    Text(progress.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 280)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .transition(.opacity)
+    }
+}
+
 struct DownloadSectionView: View {
     let title: String
     let icon: String
@@ -654,9 +919,12 @@ struct SummaryItem: View {
 
 struct DownloadedSection: View {
     let groups: [SimpleDownloadGroup]
+    let isSelecting: Bool
+    let selectedTitles: Set<String>
+    let onToggleSelection: (String) -> Void
     let onDelete: (DownloadedAsset) -> Void
     let onPlay: (DownloadedAsset) -> Void
-    
+
     @State private var groupToDelete: SimpleDownloadGroup?
     @State private var showDeleteGroupAlert = false
     @EnvironmentObject var jsController: JSController
@@ -664,9 +932,11 @@ struct DownloadedSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: "folder.fill")
+                Image(systemName: isSelecting ? "checkmark.circle" : "folder.fill")
                     .foregroundColor(.accentColor)
-                Text(NSLocalizedString("Downloaded Shows", comment: "").uppercased())
+                Text(isSelecting
+                     ? NSLocalizedString("Select Shows to Export", comment: "").uppercased()
+                     : NSLocalizedString("Downloaded Shows", comment: "").uppercased())
                     .font(.footnote)
                     .fontWeight(.medium)
                     .foregroundColor(.secondary)
@@ -677,6 +947,9 @@ struct DownloadedSection: View {
                 ForEach(groups, id: \ .title) { group in
                     EnhancedDownloadGroupCard(
                         group: group,
+                        isSelecting: isSelecting,
+                        isSelected: selectedTitles.contains(group.title),
+                        onToggleSelection: { onToggleSelection(group.title) },
                         onDelete: onDelete,
                         onPlay: onPlay
                     )
@@ -919,13 +1192,36 @@ struct EnhancedActiveDownloadCard: View {
 
 struct EnhancedDownloadGroupCard: View {
     let group: SimpleDownloadGroup
+    var isSelecting: Bool = false
+    var isSelected: Bool = false
+    var onToggleSelection: () -> Void = {}
     let onDelete: (DownloadedAsset) -> Void
     let onPlay: (DownloadedAsset) -> Void
-    
+
     var body: some View {
-        NavigationLink(destination: EnhancedShowEpisodesView(group: group, onDelete: onDelete, onPlay: onPlay)) {
+        Group {
+            if isSelecting {
+                Button(action: onToggleSelection) {
+                    cardContent
+                }
+            } else {
+                NavigationLink(destination: EnhancedShowEpisodesView(group: group, onDelete: onDelete, onPlay: onPlay)) {
+                    cardContent
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private var cardContent: some View {
             VStack(spacing: 0) {
                 HStack(spacing: 16) {
+                    if isSelecting {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundColor(isSelected ? .accentColor : .secondary)
+                    }
+
                     Group {
                         if let posterURL = group.posterURL {
                             LazyImage(url: posterURL) { @MainActor state in
@@ -972,10 +1268,12 @@ struct EnhancedDownloadGroupCard: View {
                     }
                     
                     Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+
+                    if !isSelecting {
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 .padding(16)
                 .contentShape(Rectangle())
@@ -985,21 +1283,23 @@ struct EnhancedDownloadGroupCard: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .strokeBorder(
-                        LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: Color.accentColor.opacity(0.3), location: 0),
-                                .init(color: Color.accentColor.opacity(0), location: 1)
-                            ]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.5
+                        isSelecting && isSelected
+                            ? AnyShapeStyle(Color.accentColor)
+                            : AnyShapeStyle(
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: Color.accentColor.opacity(0.3), location: 0),
+                                        .init(color: Color.accentColor.opacity(0), location: 1)
+                                    ]),
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            ),
+                        lineWidth: isSelecting && isSelected ? 1.5 : 0.5
                     )
             )
-        }
-        .buttonStyle(PlainButtonStyle())
     }
-    
+
     private func formatFileSize(_ size: Int64) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]

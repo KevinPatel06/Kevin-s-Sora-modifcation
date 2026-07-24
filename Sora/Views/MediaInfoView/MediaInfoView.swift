@@ -879,6 +879,20 @@ struct MediaInfoView: View {
                 tmdbID   = id
                 tmdbType = type
                 matchedTitle = matched
+
+                // A manual correction always wins over an automatic match.
+                ProviderMatchStore.shared.save(
+                    ProviderMatch(
+                        anilistId: itemID,
+                        tmdbId: id,
+                        tmdbType: type.rawValue,
+                        matchedAt: Date(),
+                        source: .manual
+                    ),
+                    moduleId: module.id.uuidString,
+                    showHref: href
+                )
+
                 fetchMetadataIDIfNeeded()
             }
         }
@@ -1058,6 +1072,8 @@ struct MediaInfoView: View {
     }
     
     private func toggleBookmark() {
+        let wasBookmarked = libraryManager.isBookmarked(href: href, moduleName: module.metadata.sourceName)
+
         libraryManager.toggleBookmark(
             title: title,
             imageUrl: imageUrl,
@@ -1065,6 +1081,22 @@ struct MediaInfoView: View {
             moduleId: module.id.uuidString,
             moduleName: module.metadata.sourceName
         )
+
+        // Capture the provider IDs this screen already resolved, so the Latest
+        // tab never has to re-run fuzzy title matching for this show.
+        if !wasBookmarked, itemID != nil || tmdbID != nil {
+            ProviderMatchStore.shared.saveIfAbsent(
+                ProviderMatch(
+                    anilistId: itemID,
+                    tmdbId: tmdbID,
+                    tmdbType: tmdbType?.rawValue,
+                    matchedAt: Date(),
+                    source: .auto
+                ),
+                moduleId: module.id.uuidString,
+                showHref: href
+            )
+        }
     }
     
     private func toggleSingleEpisodeWatchStatus() {
@@ -1163,6 +1195,20 @@ struct MediaInfoView: View {
         self.activeProvider = "AniList"
         UserDefaults.standard.set("AniList", forKey: "metadataProviders")
         UserDefaults.standard.set(selectedID, forKey: "custom_anilist_id_\(href)")
+
+        // A manual correction always wins over an automatic match.
+        ProviderMatchStore.shared.save(
+            ProviderMatch(
+                anilistId: selectedID,
+                tmdbId: tmdbID,
+                tmdbType: tmdbType?.rawValue,
+                matchedAt: Date(),
+                source: .manual
+            ),
+            moduleId: module.id.uuidString,
+            showHref: href
+        )
+
         self.fetchDetails()
         isMatchingPresented = false
     }

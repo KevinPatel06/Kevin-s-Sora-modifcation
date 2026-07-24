@@ -4,6 +4,10 @@ on:
     branches:
       - main
       - dev
+      # Feature branches build too: this repo has no test target and no local
+      # compiler (Windows, no Xcode), so CI is the only compile check there is.
+      # Only the iOS job runs on push; the Catalyst job stays dispatch-only.
+      - 'feature/**'
   workflow_dispatch:
 
 jobs:

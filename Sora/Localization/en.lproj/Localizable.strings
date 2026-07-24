@@ -389,6 +389,7 @@
 
 /* TabView */
 "LibraryTab" = "Library";
+"LatestTab" = "Latest";
 "DownloadsTab" = "Downloads";
 "SettingsTab" = "Settings";
 "SearchTab" = "Search";
@@ -468,3 +469,16 @@
 "Delete Selected Files?" = "Delete Selected Files?";
 "Are you sure you want to delete the selected orphaned files? This action cannot be undone." = "Are you sure you want to delete the selected orphaned files? This action cannot be undone.";
 
+
+/* Latest */
+/* "Episode %d" and "No Bookmarks" already exist above and are reused. */
+"recently" = "recently";
+"New" = "New";
+"Bookmark shows to see their new episodes here." = "Bookmark shows to see their new episodes here.";
+"Pull to Refresh" = "Pull to Refresh";
+"Pull down to check your library for new episodes." = "Pull down to check your library for new episodes.";
+"No New Episodes" = "No New Episodes";
+"No episodes could be loaded for your library." = "No episodes could be loaded for your library.";
+"Matching %1$d of %2$d" = "Matching %1$d of %2$d";
+"Checking %1$d of %2$d" = "Checking %1$d of %2$d";
+"Module not available" = "Module not available";

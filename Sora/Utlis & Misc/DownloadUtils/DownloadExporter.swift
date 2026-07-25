@@ -37,6 +37,8 @@ private struct ExportJob: Sendable {
     let baseName: String
     let source: URL
     let subtitle: URL?
+    /// The asset's stored name, used to re-find the file if its path went stale.
+    let assetName: String
 }
 
 private enum ExportJobResult: Sendable {
@@ -191,10 +193,18 @@ final class DownloadExporter: ObservableObject {
     /// picking a destination folder doesn't.
     func shareExportedFolder() -> Bool {
         let folder = Self.appExportFolder
-        guard FileManager.default.fileExists(atPath: folder.path) else {
-            Logger.shared.log("Export: nothing to share, \(folder.path) does not exist", type: "Info")
+
+        // Sharing an empty folder looks like a failure, so treat it as one.
+        let contents = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey])
+        var fileCount = 0
+        while let item = contents?.nextObject() as? URL {
+            if (try? item.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true { fileCount += 1 }
+        }
+        guard fileCount > 0 else {
+            Logger.shared.log("Export: nothing to share, \(folder.path) holds no files", type: "Info")
             return false
         }
+        Logger.shared.log("Export: sharing \(fileCount) files from \(folder.path)", type: "Download")
 
         guard let presenter = FolderPickerCoordinator.topViewController() else { return false }
 
@@ -322,6 +332,16 @@ final class DownloadExporter: ObservableObject {
             type: "Download"
         )
 
+        if let downloads = Self.downloadsDirectory,
+           let files = try? FileManager.default.contentsOfDirectory(at: downloads, includingPropertiesForKeys: nil) {
+            let byExtension = Dictionary(grouping: files, by: { $0.pathExtension.lowercased() })
+                .map { "\($0.value.count) .\($0.key.isEmpty ? "(none)" : $0.key)" }
+                .sorted()
+            Logger.shared.log("Export: downloads folder holds \(byExtension.joined(separator: ", "))", type: "Download")
+        } else {
+            Logger.shared.log("Export: downloads folder is missing or unreadable", type: "Error")
+        }
+
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         } catch {
@@ -340,7 +360,8 @@ final class DownloadExporter: ObservableObject {
                         showFolder: folder,
                         baseName: Self.episodeBaseName(for: asset),
                         source: asset.localURL,
-                        subtitle: asset.localSubtitleURL
+                        subtitle: asset.localSubtitleURL,
+                        assetName: asset.name
                     )
                 )
             }
@@ -375,17 +396,59 @@ final class DownloadExporter: ObservableObject {
 
     // MARK: - File work (off the main actor)
 
+    /// Where the app currently keeps finished downloads.
+    private nonisolated static var downloadsDirectory: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("SoraDownloads", isDirectory: true)
+    }
+
+    /// Finds the file an asset actually points at.
+    ///
+    /// iOS changes the container UUID between installs, so the absolute `localURL`
+    /// stored with an asset goes stale even though the file is still on disk. The
+    /// filename survives, so rebuild the path against the current container before
+    /// giving up. This mirrors what `verifyAssetFileExists` does before playback.
+    private nonisolated static func resolveSource(_ url: URL, assetName: String) -> URL? {
+        let fileManager = FileManager.default
+
+        if fileManager.fileExists(atPath: url.path) { return url }
+        guard let downloads = downloadsDirectory else { return nil }
+
+        let rebuilt = downloads.appendingPathComponent(url.lastPathComponent)
+        if fileManager.fileExists(atPath: rebuilt.path) {
+            Logger.shared.log("Export: repaired stale path for \(url.lastPathComponent)", type: "Download")
+            return rebuilt
+        }
+
+        guard let files = try? fileManager.contentsOfDirectory(at: downloads, includingPropertiesForKeys: nil) else {
+            return nil
+        }
+        if let match = files.first(where: { $0.lastPathComponent == url.lastPathComponent })
+            ?? files.first(where: { !assetName.isEmpty && $0.lastPathComponent.contains(assetName) }) {
+            Logger.shared.log("Export: matched \(url.lastPathComponent) to \(match.lastPathComponent)", type: "Download")
+            return match
+        }
+
+        return nil
+    }
+
     private nonisolated static func perform(_ job: ExportJob, under root: URL) -> ExportJobResult {
         let fileManager = FileManager.default
 
+        guard let source = resolveSource(job.source, assetName: job.assetName) else {
+            Logger.shared.log("Export skipped, file not found anywhere: \(job.source.lastPathComponent)", type: "Error")
+            return .failed
+        }
+
         var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: job.source.path, isDirectory: &isDirectory) else {
-            Logger.shared.log("Export skipped, missing file: \(job.source.path)", type: "Error")
+        guard fileManager.fileExists(atPath: source.path, isDirectory: &isDirectory) else {
+            Logger.shared.log("Export skipped, missing file: \(source.path)", type: "Error")
             return .failed
         }
 
         // HLS downloads land as .movpkg bundles, which are useless outside the app.
-        if isDirectory.boolValue || job.source.pathExtension.lowercased() == "movpkg" {
+        if isDirectory.boolValue || source.pathExtension.lowercased() == "movpkg" {
+            Logger.shared.log("Export: \(job.baseName) is an HLS bundle, not exportable", type: "Download")
             return .notExportable
         }
 
@@ -397,7 +460,7 @@ final class DownloadExporter: ObservableObject {
             return .failed
         }
 
-        let ext = job.source.pathExtension.isEmpty ? "mp4" : job.source.pathExtension
+        let ext = source.pathExtension.isEmpty ? "mp4" : source.pathExtension
         let target = showFolder.appendingPathComponent("\(job.baseName).\(ext)")
 
         if fileManager.fileExists(atPath: target.path) {
@@ -406,7 +469,7 @@ final class DownloadExporter: ObservableObject {
         }
 
         do {
-            try fileManager.copyItem(at: job.source, to: target)
+            try fileManager.copyItem(at: source, to: target)
         } catch {
             Logger.shared.log("Export failed for \(job.baseName): \(error.localizedDescription)", type: "Error")
             // Don't leave a half-written file behind.
@@ -420,8 +483,8 @@ final class DownloadExporter: ObservableObject {
 
     /// Copies the sidecar subtitle next to the video, using the same base name.
     private nonisolated static func copySubtitle(_ job: ExportJob, to showFolder: URL) {
-        guard let subtitle = job.subtitle,
-              FileManager.default.fileExists(atPath: subtitle.path) else { return }
+        guard let stored = job.subtitle,
+              let subtitle = resolveSource(stored, assetName: job.assetName) else { return }
 
         let ext = subtitle.pathExtension.isEmpty ? "vtt" : subtitle.pathExtension
         let target = showFolder.appendingPathComponent("\(job.baseName).\(ext)")

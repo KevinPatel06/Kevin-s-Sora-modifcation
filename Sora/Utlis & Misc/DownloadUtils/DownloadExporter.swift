@@ -85,7 +85,12 @@ final class FolderPickerCoordinator: NSObject, UIDocumentPickerDelegate {
         onPick = completion
         retained = self
 
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        // Some providers vend directories as public.directory rather than public.folder;
+        // accepting both makes more of the Files hierarchy selectable.
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.folder, .directory],
+            asCopy: false
+        )
         picker.delegate = self
         picker.allowsMultipleSelection = false
         picker.shouldShowFileExtensions = true
@@ -94,8 +99,8 @@ final class FolderPickerCoordinator: NSObject, UIDocumentPickerDelegate {
         Logger.shared.log("Export: folder picker presented", type: "Info")
     }
 
-    private func finish(with url: URL?) {
-        Logger.shared.log("Export: folder picker returned \(url?.path ?? "nothing")", type: "Info")
+    private func finish(with url: URL?, reason: String) {
+        Logger.shared.log("Export: folder picker \(reason) — \(url?.path ?? "no URL")", type: "Info")
         let callback = onPick
         onPick = nil
         retained = nil
@@ -103,15 +108,15 @@ final class FolderPickerCoordinator: NSObject, UIDocumentPickerDelegate {
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        finish(with: urls.first)
+        finish(with: urls.first, reason: urls.isEmpty ? "picked an empty selection" : "picked a folder")
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        finish(with: nil)
+        finish(with: nil, reason: "was cancelled or dismissed")
     }
 
     /// Walks past anything already presented so the picker isn't presented on a busy controller.
-    private static func topViewController() -> UIViewController? {
+    static func topViewController() -> UIViewController? {
         let scene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first { $0.activationState == .foregroundActive }
@@ -138,11 +143,29 @@ final class DownloadExporter: ObservableObject {
 
     @Published private(set) var progress: ExportProgress?
     @Published private(set) var hasDestination: Bool
+    /// True once we've given up on the Files picker and are writing inside the app.
+    @Published private(set) var usingAppFolder: Bool
 
     private static let bookmarkKey = "exportDestinationBookmark"
+    private static let appFolderKey = "exportUsesAppFolder"
 
     init() {
         hasDestination = UserDefaults.standard.data(forKey: Self.bookmarkKey) != nil
+        usingAppFolder = UserDefaults.standard.bool(forKey: Self.appFolderKey)
+    }
+
+    /// `Documents/Sora` inside the app's own container — always writable, no picker
+    /// and no security scope involved. Reachable from the Files app.
+    nonisolated static var appExportFolder: URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent(exportRootFolderName, isDirectory: true)
+    }
+
+    /// Switches exports to the app's own Documents folder.
+    func useAppFolder() {
+        UserDefaults.standard.set(true, forKey: Self.appFolderKey)
+        usingAppFolder = true
+        Logger.shared.log("Export: falling back to the app's own folder at \(Self.appExportFolder.path)", type: "Info")
     }
 
     // MARK: - Destination
@@ -161,6 +184,24 @@ final class DownloadExporter: ObservableObject {
         #else
         return []
         #endif
+    }
+
+    /// Hands the exported folder to Files in *export* mode, where the system performs
+    /// the copy itself. This needs no security-scoped grant, so it still works when
+    /// picking a destination folder doesn't.
+    func shareExportedFolder() -> Bool {
+        let folder = Self.appExportFolder
+        guard FileManager.default.fileExists(atPath: folder.path) else {
+            Logger.shared.log("Export: nothing to share, \(folder.path) does not exist", type: "Info")
+            return false
+        }
+
+        guard let presenter = FolderPickerCoordinator.topViewController() else { return false }
+
+        let picker = UIDocumentPickerViewController(forExporting: [folder], asCopy: true)
+        presenter.present(picker, animated: true)
+        Logger.shared.log("Export: sharing \(folder.path) via the export picker", type: "Info")
+        return true
     }
 
     /// Shows the Files folder picker and stores the result.
@@ -186,6 +227,9 @@ final class DownloadExporter: ObservableObject {
     func saveDestination(_ url: URL) throws {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+
+        UserDefaults.standard.set(false, forKey: Self.appFolderKey)
+        usingAppFolder = false
 
         let data = try url.bookmarkData(
             options: Self.bookmarkCreationOptions,
@@ -222,6 +266,10 @@ final class DownloadExporter: ObservableObject {
     /// Resolves the stored bookmark. The caller is responsible for balancing
     /// `startAccessingSecurityScopedResource()`.
     private func resolveDestination() throws -> URL {
+        if usingAppFolder {
+            return Self.appExportFolder
+        }
+
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
             throw ExportError.noDestination
         }

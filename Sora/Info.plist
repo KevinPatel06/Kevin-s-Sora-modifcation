@@ -8,6 +8,10 @@
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>

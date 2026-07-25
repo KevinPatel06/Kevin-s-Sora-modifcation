@@ -499,3 +499,6 @@
 "%d failed — see the logs for details" = "%d failed — see the logs for details";
 "No export folder has been chosen yet." = "No export folder has been chosen yet.";
 "The export folder is no longer available. Please choose it again." = "The export folder is no longer available. Please choose it again.";
+"Share Exported Folder…" = "Share Exported Folder…";
+"Nothing has been exported to the app's folder yet." = "Nothing has been exported to the app's folder yet.";
+"Files couldn't give the app a folder, so this went to the app's own folder. Use \"Share Exported Folder…\" to move it where you want." = "Files couldn't give the app a folder, so this went to the app's own folder. Use \"Share Exported Folder…\" to move it where you want.";

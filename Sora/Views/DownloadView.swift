@@ -66,7 +66,8 @@ struct DownloadView: View {
                                 isSelectingForExport = true
                             }
                         },
-                        onChangeExportFolder: changeExportFolder
+                        onChangeExportFolder: changeExportFolder,
+                        onShareExportedFolder: shareExportedFolder
                     )
 
                     if isSelectingForExport {
@@ -267,15 +268,24 @@ struct DownloadView: View {
     private func startExport() {
         guard !selectedShowTitles.isEmpty else { return }
 
-        // First export needs a destination; picking one continues straight into the copy.
-        guard exporter.hasDestination else {
+        // First export needs a destination. If Files won't hand one over — which is
+        // what happens when the picker's folder grant fails — export into the app's
+        // own folder rather than leaving the user with nothing.
+        guard exporter.hasDestination || exporter.usingAppFolder else {
             exporter.pickDestination { picked in
-                if picked { runExport() }
+                if !picked { self.exporter.useAppFolder() }
+                self.runExport()
             }
             return
         }
 
         runExport()
+    }
+
+    private func shareExportedFolder() {
+        if !exporter.shareExportedFolder() {
+            exportErrorMessage = NSLocalizedString("Nothing has been exported to the app's folder yet.", comment: "")
+        }
     }
 
     private func runExport() {
@@ -310,6 +320,10 @@ struct DownloadView: View {
         var lines: [String] = []
         lines.append(String(format: NSLocalizedString("%d episodes copied to %@", comment: ""),
                             summary.exported, summary.destinationPath))
+
+        if exporter.usingAppFolder {
+            lines.append(NSLocalizedString("Files couldn't give the app a folder, so this went to the app's own folder. Use \"Share Exported Folder…\" to move it where you want.", comment: ""))
+        }
 
         if summary.skippedExisting > 0 {
             lines.append(String(format: NSLocalizedString("%d already in the folder", comment: ""),
@@ -492,6 +506,7 @@ struct CustomDownloadHeader: View {
     let hasExportDestination: Bool
     let onStartExportSelection: () -> Void
     let onChangeExportFolder: () -> Void
+    let onShareExportedFolder: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -537,6 +552,10 @@ struct CustomDownloadHeader: View {
                                       ? NSLocalizedString("Change Export Folder…", comment: "")
                                       : NSLocalizedString("Choose Export Folder…", comment: ""),
                                       systemImage: "folder")
+                            }
+                            Button(action: onShareExportedFolder) {
+                                Label(NSLocalizedString("Share Exported Folder…", comment: ""),
+                                      systemImage: "arrow.up.doc")
                             }
                         } label: {
                             Image(systemName: "square.and.arrow.up")

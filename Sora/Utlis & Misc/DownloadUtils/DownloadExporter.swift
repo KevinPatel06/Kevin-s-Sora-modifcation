@@ -7,6 +7,8 @@
 //
 
 import Foundation
+import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - Types
 //
@@ -44,6 +46,9 @@ private enum ExportJobResult: Sendable {
     case failed
 }
 
+/// Folder created inside whatever the user picked.
+private let exportRootFolderName = "Sora"
+
 enum ExportError: LocalizedError {
     case noDestination
     case destinationUnavailable
@@ -55,6 +60,70 @@ enum ExportError: LocalizedError {
         case .destinationUnavailable:
             return NSLocalizedString("The export folder is no longer available. Please choose it again.", comment: "")
         }
+    }
+}
+
+/// Presents the Files folder picker over whatever is on screen.
+///
+/// SwiftUI's `.fileImporter` proved unreliable in folder mode — the picker appears but
+/// tapping Open never delivers a URL — so this drives `UIDocumentPickerViewController`
+/// directly. The coordinator keeps itself alive until the delegate fires.
+@MainActor
+final class FolderPickerCoordinator: NSObject, UIDocumentPickerDelegate {
+
+    private var onPick: ((URL?) -> Void)?
+    private var retained: FolderPickerCoordinator?
+
+    /// Presents the picker and calls back with the chosen folder, or nil if cancelled.
+    func present(completion: @escaping (URL?) -> Void) {
+        guard let presenter = Self.topViewController() else {
+            Logger.shared.log("Export: no view controller available to present the folder picker", type: "Error")
+            completion(nil)
+            return
+        }
+
+        onPick = completion
+        retained = self
+
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        picker.delegate = self
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        presenter.present(picker, animated: true)
+
+        Logger.shared.log("Export: folder picker presented", type: "Info")
+    }
+
+    private func finish(with url: URL?) {
+        Logger.shared.log("Export: folder picker returned \(url?.path ?? "nothing")", type: "Info")
+        let callback = onPick
+        onPick = nil
+        retained = nil
+        callback?(url)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        finish(with: urls.first)
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        finish(with: nil)
+    }
+
+    /// Walks past anything already presented so the picker isn't presented on a busy controller.
+    private static func topViewController() -> UIViewController? {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+
+        guard var top = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+                ?? scene?.windows.first?.rootViewController else { return nil }
+
+        while let presented = top.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        return top
     }
 }
 
@@ -71,8 +140,6 @@ final class DownloadExporter: ObservableObject {
     @Published private(set) var hasDestination: Bool
 
     private static let bookmarkKey = "exportDestinationBookmark"
-    /// Folder created inside whatever the user picked.
-    private static let rootFolderName = "Sora"
 
     init() {
         hasDestination = UserDefaults.standard.data(forKey: Self.bookmarkKey) != nil
@@ -96,6 +163,25 @@ final class DownloadExporter: ObservableObject {
         #endif
     }
 
+    /// Shows the Files folder picker and stores the result.
+    /// Calls back with `true` when a destination is now available.
+    func pickDestination(completion: @escaping (Bool) -> Void) {
+        let coordinator = FolderPickerCoordinator()
+        coordinator.present { [weak self] url in
+            guard let self = self, let url = url else {
+                completion(false)
+                return
+            }
+            do {
+                try self.saveDestination(url)
+                completion(true)
+            } catch {
+                Logger.shared.log("Export: could not save destination: \(error.localizedDescription)", type: "Error")
+                completion(false)
+            }
+        }
+    }
+
     /// Stores the folder the user picked in the Files app.
     func saveDestination(_ url: URL) throws {
         let accessed = url.startAccessingSecurityScopedResource()
@@ -116,10 +202,21 @@ final class DownloadExporter: ObservableObject {
         hasDestination = false
     }
 
+    /// The folder episodes actually go into.
+    ///
+    /// If the user already picked a folder called "Sora", use it as-is rather than
+    /// nesting another one inside it.
+    private nonisolated static func exportRoot(under destination: URL) -> URL {
+        if destination.lastPathComponent.caseInsensitiveCompare(exportRootFolderName) == .orderedSame {
+            return destination
+        }
+        return destination.appendingPathComponent(exportRootFolderName, isDirectory: true)
+    }
+
     /// Human-readable path of the current destination, for display in the UI.
     var destinationDisplayPath: String? {
         guard let url = try? resolveDestination() else { return nil }
-        return url.appendingPathComponent(Self.rootFolderName).path
+        return Self.exportRoot(under: url).path
     }
 
     /// Resolves the stored bookmark. The caller is responsible for balancing
@@ -170,7 +267,12 @@ final class DownloadExporter: ObservableObject {
         defer { if accessed { destination.stopAccessingSecurityScopedResource() } }
 
         var summary = ExportSummary(showCount: shows.count)
-        let root = destination.appendingPathComponent(Self.rootFolderName, isDirectory: true)
+        let root = Self.exportRoot(under: destination)
+
+        Logger.shared.log(
+            "Export starting: \(shows.count) shows into \(root.path) (security scope \(accessed ? "granted" : "denied"))",
+            type: "Download"
+        )
 
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

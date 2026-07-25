@@ -8,7 +8,6 @@
 import AVKit
 import NukeUI
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct DownloadView: View {
     @EnvironmentObject var jsController: JSController
@@ -23,7 +22,6 @@ struct DownloadView: View {
     @StateObject private var exporter = DownloadExporter()
     @State private var isSelectingForExport = false
     @State private var selectedShowTitles: Set<String> = []
-    @State private var showFolderPicker = false
     @State private var exportSummary: ExportSummary?
     @State private var exportErrorMessage: String?
 
@@ -68,7 +66,7 @@ struct DownloadView: View {
                                 isSelectingForExport = true
                             }
                         },
-                        onChangeExportFolder: { showFolderPicker = true }
+                        onChangeExportFolder: changeExportFolder
                     )
 
                     if isSelectingForExport {
@@ -89,26 +87,13 @@ struct DownloadView: View {
                     ExportProgressOverlay(progress: progress)
                 }
             }
-            .fileImporter(
-                isPresented: $showFolderPicker,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                handleFolderPick(result)
-            }
-            .alert(NSLocalizedString("Export Finished", comment: ""), isPresented: exportSummaryBinding) {
-                Button(NSLocalizedString("OK", comment: ""), role: .cancel) { exportSummary = nil }
-            } message: {
-                if let summary = exportSummary {
-                    Text(exportSummaryMessage(summary))
+            .alert(exportAlertTitle, isPresented: exportAlertBinding) {
+                Button(NSLocalizedString("OK", comment: ""), role: .cancel) {
+                    exportSummary = nil
+                    exportErrorMessage = nil
                 }
-            }
-            .alert(NSLocalizedString("Export Failed", comment: ""), isPresented: exportErrorBinding) {
-                Button(NSLocalizedString("OK", comment: ""), role: .cancel) { exportErrorMessage = nil }
             } message: {
-                if let message = exportErrorMessage {
-                    Text(message)
-                }
+                Text(exportAlertMessage)
             }
             .alert(NSLocalizedString("Delete Download", comment: ""), isPresented: $showDeleteAlert) {
                 Button(NSLocalizedString("Delete", comment: ""), role: .destructive) {
@@ -236,12 +221,28 @@ struct DownloadView: View {
         !groupedAssets.isEmpty && selectedShowTitles.count == groupedAssets.count
     }
 
-    private var exportSummaryBinding: Binding<Bool> {
-        Binding(get: { exportSummary != nil }, set: { if !$0 { exportSummary = nil } })
+    private var exportAlertBinding: Binding<Bool> {
+        Binding(
+            get: { exportSummary != nil || exportErrorMessage != nil },
+            set: { presented in
+                if !presented {
+                    exportSummary = nil
+                    exportErrorMessage = nil
+                }
+            }
+        )
     }
 
-    private var exportErrorBinding: Binding<Bool> {
-        Binding(get: { exportErrorMessage != nil }, set: { if !$0 { exportErrorMessage = nil } })
+    private var exportAlertTitle: String {
+        exportErrorMessage != nil
+            ? NSLocalizedString("Export Failed", comment: "")
+            : NSLocalizedString("Export Finished", comment: "")
+    }
+
+    private var exportAlertMessage: String {
+        if let message = exportErrorMessage { return message }
+        if let summary = exportSummary { return exportSummaryMessage(summary) }
+        return ""
     }
 
     private func toggleShowSelection(_ title: String) {
@@ -266,9 +267,11 @@ struct DownloadView: View {
     private func startExport() {
         guard !selectedShowTitles.isEmpty else { return }
 
-        // First export needs a destination; the picker resumes the export itself.
+        // First export needs a destination; picking one continues straight into the copy.
         guard exporter.hasDestination else {
-            showFolderPicker = true
+            exporter.pickDestination { picked in
+                if picked { runExport() }
+            }
             return
         }
 
@@ -299,22 +302,8 @@ struct DownloadView: View {
         }
     }
 
-    private func handleFolderPick(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            do {
-                try exporter.saveDestination(url)
-                // Picking a folder mid-export is the user confirming where to put things.
-                if isSelectingForExport && !selectedShowTitles.isEmpty {
-                    runExport()
-                }
-            } catch {
-                exportErrorMessage = error.localizedDescription
-            }
-        case .failure(let error):
-            Logger.shared.log("Export folder pick failed: \(error.localizedDescription)", type: "Error")
-        }
+    private func changeExportFolder() {
+        exporter.pickDestination { _ in }
     }
 
     private func exportSummaryMessage(_ summary: ExportSummary) -> String {

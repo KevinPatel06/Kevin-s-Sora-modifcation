@@ -96,5 +96,5 @@ $destItem.LastWriteTime = $now
 $sizeMb = [math]::Round($destItem.Length / 1MB, 1)
 Write-Host ""
 Write-Host "Ready: $dest  ($sizeMb MB)" -ForegroundColor Green
-Write-Host "Built $([datetime]::Parse($run.createdAt).ToLocalTime().ToString('ddd h:mm tt'))  ·  fetched $($now.ToString('h:mm tt'))" -ForegroundColor Green
+Write-Host "Built $([datetime]::Parse($run.createdAt).ToLocalTime().ToString('ddd h:mm tt'))  |  fetched $($now.ToString('h:mm tt'))" -ForegroundColor Green
 Write-Host "Copy it to your phone and import it in LiveContainer." -ForegroundColor Green

@@ -85,7 +85,16 @@ $dest = Join-Path $dist 'Sulfur.ipa'
 Copy-Item $ipa.FullName $dest -Force
 Remove-Item $staging -Recurse -Force
 
-$sizeMb = [math]::Round((Get-Item $dest).Length / 1MB, 1)
+# Expand-Archive reads the zip's UTC timestamps as if they were local, so the
+# extracted file lands hours in the future in any timezone behind UTC. Copy-Item
+# preserves that, and a future-dated file confuses iCloud Drive and date sorting.
+$now = Get-Date
+$destItem = Get-Item $dest
+$destItem.CreationTime = $now
+$destItem.LastWriteTime = $now
+
+$sizeMb = [math]::Round($destItem.Length / 1MB, 1)
 Write-Host ""
 Write-Host "Ready: $dest  ($sizeMb MB)" -ForegroundColor Green
+Write-Host "Built $([datetime]::Parse($run.createdAt).ToLocalTime().ToString('ddd h:mm tt'))  ·  fetched $($now.ToString('h:mm tt'))" -ForegroundColor Green
 Write-Host "Copy it to your phone and import it in LiveContainer." -ForegroundColor Green

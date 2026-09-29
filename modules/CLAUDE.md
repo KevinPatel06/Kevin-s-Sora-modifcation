@@ -12,7 +12,17 @@ This folder is for **writing modules** (a metadata JSON + a JavaScript scraper),
 
 Keep the two `reference/` files verbatim so they can be diffed against future upstream copies. Put corrections here, not in them.
 
-Actual modules go in `modules/<source-name>/` (manifest + script). `modules/anikura/` is the reference implementation — a fork of MXFia19's module with the subtitle fix and its Supabase tracker removed; see `MODULE_CREATION.md` §9.10. Its `scriptUrl` points at this repo's `main` branch on raw.githubusercontent.com, so a script change goes live only after it's pushed, and `version` must be bumped every time.
+Actual modules go in `modules/<source-name>/` (manifest + script). Each manifest's `scriptUrl` points at this repo's `main` branch on raw.githubusercontent.com, so a script change goes live only after it's pushed, and `version` must be bumped every time. Hosting our own copies means upstream fixes don't arrive on their own — re-diff against upstream when a source breaks.
+
+| Module | Upstream | What the fork changed |
+|---|---|---|
+| `anikura/` | MXFia19 | Subtitles attached per server; Supabase tracker removed. **The reference implementation** — `MODULE_CREATION.md` §9.10 |
+| `vidrift/` | MXFia19 | Subtitle urls made absolute (upstream's relative ones were silently dropped); tracker removed |
+| `aether/` | MXFia19 | Tracker removed. Subtitles already worked |
+| `bingebox/` | MXFia19 | Nothing — copied as-is (no tracker). Its API is behind a Cloudflare challenge, so streams can't be tested from a desktop IP |
+| `kissasian/` | xdfkenny | Tries every server and skips the "coming soon" placeholder. Subtitles are burned into the video, not a separate track |
+
+MXFia19's modules are published both at `github.com/MXFia19/module-sora` and `git.luna-app.eu/MXFia19/sources`; the copies here came from GitHub.
 
 ## Corrections to the upstream reference docs (verified against source)
 
@@ -29,11 +39,18 @@ Actual modules go in `modules/<source-name>/` (manifest + script). `modules/anik
 11. **No `setTimeout`/`setInterval`** in JavaScriptCore. Neither reference doc mentions this; see `MODULE_CREATION.md` §6.
 12. `module-builder.md` contains `[cite: N]` markers — leftovers from whatever tool generated it. Ignore them.
 
-## Testing: `run_module.js` is not the real runtime
+## Testing: `tools/sora-harness.js`
 
-`reference/SKILL.md` §3 points at a Node VM harness downloaded from `files.catbox.moe` (an anonymous file host). Two cautions:
+Use this instead of the `run_module.js` that `reference/SKILL.md` §3 downloads from `files.catbox.moe` (an anonymous file host — unreviewed, and it runs modules with Node's timers, `fetch`, and multi-arg `console.log`, none of which the app has).
 
-- **Read it before running it.** It's executable code from an unattributed URL. Save it as `modules/tools/run_module.js` only after review.
-- **Passing in Node ≠ passing in Sora.** Node has `setTimeout`, a real `fetch`, and multi-arg `console.log`; the app's JavaScriptCore has none of those. Treat the harness as a fast first check, then confirm on device via Settings → Logger (filter `Debug`).
+```bash
+node modules/tools/sora-harness.js modules/anikura/anikura.js --all "one piece"          # search → details → episodes → stream
+node modules/tools/sora-harness.js modules/vidrift/vidrift.js --all "the boys" --pick 0 --ep 3
+node modules/tools/sora-harness.js modules/kissasian/kissasian.js extractStreamUrl '"https://kissasian.su/…-episode-1"' --logs
+```
 
-The persona in `module-builder.md` assumes a Kali Linux shell; this machine is Windows, so run the harness with `node` from Git Bash or PowerShell.
+It gives the module only the globals `JavaScriptCore+Extensions.swift` defines (`fetchv2` resolving `{ error }` on failure, legacy `fetch(url, headers)` → string, single-arg `console.log`, `btoa`/`atob`, **no timers**), loads the script fresh per hook like the app, and reports what the app would do with the result: `extractDetails` not an array, non-integer episode numbers, `extractEpisodes` past 15 s, top-level `subtitle` (ignored), non-`http(s)` subtitle urls (dropped), and whether each subtitle url loads the way the app's loader fetches it (browser UA, no Referer). It prints every host contacted, and never sends requests to `*.supabase.co`.
+
+It makes raw http(s) requests rather than using Node's `fetch`, because Node adds `sec-fetch-*` headers that iOS never sends — VidRift answers those with a 403 the app doesn't get. A host behind a Cloudflare challenge (BingeBox) may block a desktop IP while working on a phone; a failure there isn't proof the module is broken.
+
+Passing here is a first check. Confirm on device via Settings → Logger (filter `Debug`).

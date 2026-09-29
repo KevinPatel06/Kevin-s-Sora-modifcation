@@ -368,6 +368,7 @@ When the user saves, the overrides are stored in `UserDefaults["moduleSettings_<
 4. **"No JavaScript function X found"** means the name isn't a top-level global — check for a syntax error earlier in the file, which aborts evaluation of everything after it.
 5. **Empty results with no error** usually means a shape mismatch: a string `number` in async mode, an `Int` `number` in sync mode, or a search result missing `image`.
 6. Iterating is fast: host the `.js` anywhere, bump `version` in the metadata, and hit refresh in Settings → Modules. No app rebuild is needed for module changes.
+7. Before that, run it on the desktop with `modules/tools/sora-harness.js` (see `modules/CLAUDE.md`), which reproduces this runtime and flags the shape mismatches above.
 
 ---
 
@@ -498,7 +499,15 @@ By MXFia19 (`github.com/MXFia19/module-sora`, `anikura/`), for `anikura.club`. T
 2. The subtitle loader sends no Referer, and `www.anikura.club/api/stream/proxy` answers **403** to a request without a browser User-Agent. The edge worker `anikura-stream-edge.anikura.workers.dev` serves the same signed path with **no headers at all**, so relative track URLs are resolved against it, not `AK_BASE`.
 3. Tracks marked `"format": "srt"` come back from the proxy already converted to WEBVTT; either way the loader sniffs the content (§5.4). English is preferred (`language === "en"` or label starting "English"), else the first track.
 
-**Privacy: it reports usage to its author.** `sendSupabaseLog` POSTs each search keyword and top results, each opened entry, each played episode with the stream URLs found, and errors to the author's Supabase project (`/rest/v1/app_logs`), fire-and-forget. The app's `analyticsEnabled` toggle does not cover module code. Don't copy this into new modules. The fork copy in `modules/anikura/` has it removed entirely — no calls, no keys — and contacts only anikura hosts.
+**Privacy: it reports usage to its author.** `sendSupabaseLog` POSTs each search keyword and top results, each opened entry, each played episode with the stream URLs found, and errors to the author's Supabase project (`/rest/v1/app_logs`), fire-and-forget. The app's `analyticsEnabled` toggle does not cover module code. Don't copy this into new modules. The fork copy in `modules/anikura/` has it removed entirely — no calls, no keys — and contacts only anikura hosts. The same tracker, same project, is in MXFia19's VidRift and Aether; it's removed from those fork copies too.
+
+### 9.11 Two more subtitle traps, from VidRift and KissAsian
+
+**Relative subtitle urls are dropped without a word.** VidRift's embed page declares `var subtitleTracks = [{ code, label, url: "/api/subtitles/movie/550/en" }, …]` — 58 languages, site-relative. Upstream passed those through as top-level `subtitles`. The app keeps only entries starting `http://` or `https://` (`MediaInfoView.isURL`, `:2120`), so every track was discarded and the logger shows nothing. Resolve relative urls against the host before returning them; `modules/vidrift/` adds an `absoluteUrl()` for this.
+
+**Check the pixels before chasing a subtitle track.** KissAsian's player page declares `tracks = JSON.parse(\`[]\`)` — empty on every server tried — and its HLS playlists carry no `TYPE=SUBTITLES` rendition. The English subtitles are **burned into the video** (hardsub), visible in any player with no module support. Grab a frame (`ffmpeg -headers "Referer: …" -ss 300 -i <m3u8> -frames:v 1 f.jpg`) before concluding a module "loses" its subtitles.
+
+**Placeholder streams.** KissAsian's servers answer an un-uploaded episode with a real, playable `player.dramavideo.se/media/soon.mp4` "coming soon" clip. Upstream returned the first server that answered anything, so it often played that clip while another server had the episode. Treat known placeholders as a miss and keep trying servers; fall back to the placeholder only when nothing else exists, so the user sees why.
 
 ---
 

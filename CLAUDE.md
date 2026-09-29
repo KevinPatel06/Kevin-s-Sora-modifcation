@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A personal fork of [cranci1/Sora](https://github.com/cranci1/Sora) (upstream also calls itself "Sulfur"): a SwiftUI media player for iOS/iPadOS 15+ and Mac Catalyst 12+, GPLv3.
 
-The app ships **no content and no sources**. Everything playable comes from user-installed **modules** — a JSON metadata file plus a JavaScript scraper that runs in JavaScriptCore. The Swift side is a shell around that JS: search, details, episodes, streams, and novel chapters are all delegated to module-provided global functions. See `MODULE_CREATION.md` for the full module contract.
+The app ships **no content and no sources**. Everything playable comes from user-installed **modules** — a JSON metadata file plus a JavaScript scraper that runs in JavaScriptCore. The Swift side is a shell around that JS: search, details, episodes, streams, and novel chapters are all delegated to module-provided global functions. See `modules/MODULE_CREATION.md` for the full module contract.
+
+**Module authoring lives in `modules/`, separate from app development.** Writing a module is JS + JSON only — no Swift, no `project.pbxproj`, no CI build. `modules/CLAUDE.md` has the rules for that work.
 
 ## Development environment (important)
 

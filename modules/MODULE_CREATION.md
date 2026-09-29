@@ -227,7 +227,14 @@ return JSON.stringify({
 });
 ```
 
-When more than one stream or more than one subtitle comes back, the app shows a "Select Server" / "Select Subtitle" action sheet. Only `.vtt` is parsed by the custom player's subtitle loader.
+When more than one stream or more than one subtitle comes back, the app shows a "Select Server" / "Select Subtitle" action sheet.
+
+How the two subtitle locations interact (`MediaInfoView.resolveSubtitleSelection`, `:2056`):
+
+- The server is picked **first**; then the top-level `subtitles` list is resolved. If it holds at least one `http(s)` URL, it **wins** — one entry is used directly, several open the picker — and the chosen source's own `subtitle` is ignored. Entries that aren't `http(s)` URLs (including `""`) are dropped, and if nothing survives, the source's `subtitle` is used.
+- So when each server has its **own** subtitle file (timed to its own encode), put it on the source as `subtitle` and leave top-level `subtitles` out. A shared top-level list will pair server B's video with server A's subtitle timing.
+
+The subtitle loader (`VTTSubtitlesLoader.swift:35-62`) fetches with `URLSession.custom` — a browser User-Agent and **no other headers**; a source's `headers` (Referer etc.) are not applied to its subtitle. It sniffs the body: containing `WEBVTT` → VTT, anything else → SRT. Both formats work; the file extension doesn't matter. Subtitle URLs must be absolute and fetchable without a Referer. Only the custom (Sora) player renders them.
 
 Under `streamAsyncJS: true` (with `asyncJS` false), Swift fetches the episode page first and passes the **HTML** to your Promise-returning `extractStreamUrl` — the argument is HTML, not a URL, even though the function is async.
 
@@ -366,7 +373,7 @@ When the user saves, the overrides are stored in `UserDefaults["moduleSettings_<
 
 ## 9. Patterns from shipping modules
 
-Reviewed against three live modules by 50/50 (also the app's icon author), hosted at `git.luna-app.eu/50n50/sources`: **AnimePahe** (`animepahe.si`, 554 lines), **123Anime** (`123animehub.cc`, 165 lines), **AnimeHeaven** (`animeheaven.me`, 114 lines). All three are `asyncJS: true`; none uses a settings block. They confirm the contract above and show the conventions that have grown around it.
+Reviewed against three live modules by 50/50 (also the app's icon author), hosted at `git.luna-app.eu/50n50/sources`: **AnimePahe** (`animepahe.si`, 554 lines), **123Anime** (`123animehub.cc`, 165 lines), **AnimeHeaven** (`animeheaven.me`, 114 lines). All three are `asyncJS: true`; none uses a settings block. They confirm the contract above and show the conventions that have grown around it. §9.10 walks through a fourth, **Anikura**, end to end.
 
 ### 9.1 Modules are written for a whole ecosystem, not just Sora
 
@@ -468,6 +475,31 @@ AnimePahe bundles its own `unpack()` and an `Unbaser` class (~85 lines) to undo 
 
 AnimePahe fetches page 1, reads `last_page`, then issues the rest concurrently with `Promise.all` and merges. That concurrency isn't a style choice — `extractEpisodes` is killed at 15 s in the async path (§5.3), and a long series fetched serially will not finish. Parallelize, and keep per-request retries cheap.
 
+### 9.10 Worked example: Anikura
+
+By MXFia19 (`github.com/MXFia19/module-sora`, `anikura/`), for `anikura.club`. The fork's copy lives in `modules/anikura/` with the subtitle fix below and the usage tracker removed. It is the cleanest reference of the four: every hook follows §5 exactly, so start new modules from it.
+
+**Manifest.** All ten required fields, `asyncJS: true`, `streamType: "HLS"`, `baseUrl` set. `searchBaseUrl` has no `%s` — correct to leave that way, since async mode ignores it. Extra keys (`supportsSora`, `supportsLuna`, `changelog`, `author.url`, `downloadSupport`) are for other hosts and the library index.
+
+**Pipeline** — three requests, each hook's `href` carrying exactly what the next one needs (§9.3):
+
+| Hook | Request | Returns |
+|---|---|---|
+| `searchResults` | `GET /search?q=` (HTML), split on `<a class="poster-link` | `href: "anikura:///anime/<id>/<slug>"`; poster unwrapped from the site's `/api/media/image?u=` resize proxy so the URL is stable |
+| `extractDetails` | the entry page | `[{ description, aliases, airdate }]` — **an array**, from `<meta name="description">`, "Studio:"/"Source:" spans, and `"year"`/`"status"` in the Next.js payload |
+| `extractEpisodes` | the entry page | distinct `Episode N` numbers as ints, sorted ascending, falling back to the declared `"episodes"` count; `href: "anikura-play://<id>/<n>"` |
+| `extractStreamUrl` | `GET /api/watch/streams?id=&ep=&lang=sub\|dub` with `x-anikura-player: 1` | named servers, sub then dub, each with its own `Referer` + `User-Agent` headers |
+
+**Things it gets right that the upstream `reference/SKILL.md` gets wrong:** details as an array (not an object); subtitles never under top-level `subtitle`; every `console.log` a single template string; every hook returns a well-formed fallback (`[]`, a placeholder detail, `{ type: "none" }`); no timers.
+
+**The subtitle bug (fixed in the fork copy).** The streams API returns, per server, `tracks: [{ label, language, url, format }]` — site-relative, signed, and timed to *that* server's encode (KAA's track differs from AniKoto's). Upstream ignored them and hardcoded `subtitles: ""`, so no subtitles ever appeared. Three details shaped the fix:
+
+1. Tracks are per-server, so they go on each source as `subtitle`, and top-level `subtitles` is omitted (§5.4 — a top-level list would override every server's own track).
+2. The subtitle loader sends no Referer, and `www.anikura.club/api/stream/proxy` answers **403** to a request without a browser User-Agent. The edge worker `anikura-stream-edge.anikura.workers.dev` serves the same signed path with **no headers at all**, so relative track URLs are resolved against it, not `AK_BASE`.
+3. Tracks marked `"format": "srt"` come back from the proxy already converted to WEBVTT; either way the loader sniffs the content (§5.4). English is preferred (`language === "en"` or label starting "English"), else the first track.
+
+**Privacy: it reports usage to its author.** `sendSupabaseLog` POSTs each search keyword and top results, each opened entry, each played episode with the stream URLs found, and errors to the author's Supabase project (`/rest/v1/app_logs`), fire-and-forget. The app's `analyticsEnabled` toggle does not cover module code. Don't copy this into new modules. The fork copy in `modules/anikura/` has it removed entirely — no calls, no keys — and contacts only anikura hosts.
+
 ---
 
 ## 10. Checklist for a new video module
@@ -482,7 +514,8 @@ AnimePahe fetches page 1, reads `last_page`, then issues the rest concurrently w
 - [ ] `number` typed correctly for the chosen mode
 - [ ] Stream headers returned per-source when the host checks Referer
 - [ ] Episodes returned in ascending order; streams sorted best-first (both are displayed in array order)
-- [ ] Subtitles under the **`subtitles`** key at top level, or `subtitle` inside a source — not top-level `subtitle`
+- [ ] Subtitles under the **`subtitles`** key at top level, or `subtitle` inside a source — not top-level `subtitle`; per-server tracks go on the source, with no top-level list
+- [ ] Subtitle URLs absolute and fetchable with no Referer (the loader sends none)
 - [ ] No `setTimeout`/`setInterval` anywhere, including error and retry paths
 - [ ] Pagination parallelized so `extractEpisodes` finishes inside 15 s
 - [ ] Every hook wrapped in `try/catch` returning a well-formed placeholder

@@ -19,7 +19,7 @@ Actual modules go in `modules/<source-name>/` (manifest + script). Each manifest
 | `anikura/` | MXFia19 | Subtitles attached per server; Supabase tracker removed. **The reference implementation** — `MODULE_CREATION.md` §9.10 |
 | `vidrift/` | MXFia19 | Subtitle urls made absolute (upstream's relative ones were silently dropped); tracker removed |
 | `aether/` | MXFia19 | Tracker removed. Subtitles already worked |
-| `bingebox/` | MXFia19 | Nothing — copied as-is (no tracker). Its API is behind a Cloudflare challenge, so streams can't be tested from a desktop IP |
+| `bingebox/` | MXFia19 | Nothing — copied as-is (no tracker). **Doesn't work on device either (2026-09-29); parked, not maintained.** Its API is behind a Cloudflare challenge |
 | `kissasian/` | xdfkenny | Tries every server and skips the "coming soon" placeholder. Subtitles are burned into the video, not a separate track |
 
 MXFia19's modules are published both at `github.com/MXFia19/module-sora` and `git.luna-app.eu/MXFia19/sources`; the copies here came from GitHub.

@@ -226,7 +226,10 @@ async function extractStreamUrl(url) {
             if (!streamUrl || typeof streamUrl !== "string" || !streamUrl.startsWith("http")) return false;
             if (seenStreams.has(streamUrl)) { console.log(`[Aether][Player] ♻️ [${title}] flux en double, ignoré`); return false; }
             seenStreams.add(streamUrl);
-            streams.push({ title, streamUrl, headers: headers || { "Referer": `${SITE_URL}/`, "Origin": SITE_URL } });
+            // Fork: Shirox drops every header of a stream when one value isn't a string.
+            const h = {};
+            for (const [k, v] of Object.entries(headers || { "Referer": `${SITE_URL}/`, "Origin": SITE_URL })) if (v != null) h[k] = String(v);
+            streams.push({ title, streamUrl, headers: h });
             console.log(`[Aether][Player] ✅ [${title}] flux ajouté : ${streamUrl.slice(0, 70)}...`);
             return true;
         }
@@ -331,33 +334,22 @@ async function extractStreamUrl(url) {
                     }
                 }
 
-                // 🌟 FIX MERIDIAN (NEURONIX CDN)
-                if (rawStreamData && rawStreamData.includes("cdn.neuronix.sbs") && !rawStreamData.includes(".m3u8")) {
-                    console.log(`[Aether][Player] 🔄 [${provider.name}] Ajout des headers de contournement pour Neuronix...`);
-                    
-                    customHeaders = {
-                        "Origin": "https://cdn.neuronix.sbs",
-                        "Referer": "https://cdn.neuronix.sbs/"
-                    };
-                    
-                    rawStreamData = rawStreamData + (rawStreamData.includes('?') ? '&' : '?') + "type=.m3u8";
-                    console.log(`[Aether][Player] ✅ [${provider.name}] Lien préparé pour lecture directe avec headers.`);
+                // Fork: Meridian's CDN (was cdn.neuronix.sbs, now cdn.kaxate.fun, and
+                // it moves) only accepts its own origin as Referer/Origin; aether.ist
+                // gets a 403. Use whatever host the stream is on.
+                if (rawStreamData && provider.name === "Meridian") {
+                    const origin = (rawStreamData.match(/^https?:\/\/[^/]+/) || [""])[0];
+                    if (origin) customHeaders = { "Origin": origin, "Referer": `${origin}/` };
                 }
-                else if (rawStreamData && typeof rawStreamData === "string" && !rawStreamData.includes(".m3u8") && !rawStreamData.includes(".mp4")) {
-                    console.log(`[Aether][Player] 🔄 [${provider.name}] Lien atypique détecté : ${rawStreamData.slice(0, 50)}...`);
-                    try {
-                        const redirectCheck = await fetch(rawStreamData, { method: "HEAD" });
-                        if (redirectCheck && redirectCheck.url && redirectCheck.url !== rawStreamData) {
-                            rawStreamData = redirectCheck.url; 
-                            console.log(`[Aether][Player] ✅ [${provider.name}] Redirection résolue vers .m3u8`);
-                        } else {
-                            rawStreamData = rawStreamData + (rawStreamData.includes('?') ? '&' : '?') + "type=.m3u8";
-                            console.log(`[Aether][Player] ✅ [${provider.name}] Paramètre .m3u8 ajouté.`);
-                        }
-                    } catch (e) {
-                        rawStreamData = rawStreamData + (rawStreamData.includes('?') ? '&' : '?') + "type=.m3u8";
-                        console.log(`[Aether][Player] ⚠️ [${provider.name}] Résolution bloquée, forçage .m3u8 appliqué.`);
-                    }
+                // Fork: links without an extension (Lul's worker) are handed to the
+                // player as they are, plus the .m3u8 hint. They used to be resolved
+                // here with a HEAD first, but the address they redirect to carries a
+                // token bound to the User-Agent that asked for it, so the player
+                // (another UA) got a 403. That HEAD only ran in Shirox: Sora's legacy
+                // fetch returns a string, so Sora always took this path.
+                if (rawStreamData && typeof rawStreamData === "string" && !rawStreamData.includes(".m3u8") && !rawStreamData.includes(".mp4")) {
+                    rawStreamData = rawStreamData + (rawStreamData.includes('?') ? '&' : '?') + "type=.m3u8";
+                    console.log(`[Aether][Player] ✅ [${provider.name}] Paramètre .m3u8 ajouté.`);
                 }
 
                 if (rawStreamData) {
@@ -455,7 +447,10 @@ function parsePlayHref(url) {
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
     try {
         if (typeof fetchv2 !== 'undefined') {
-            return await fetchv2(url, options.headers ?? {}, options.method ?? 'GET', options.body ?? null, true, options.encoding ?? 'utf-8');
+            // Fork: no 5th argument. Sora reads it as "follow redirects" (already the
+            // default); Shirox reads `true` as "impersonate Safari" and swaps in
+            // browser-navigation headers.
+            return await fetchv2(url, options.headers ?? {}, options.method ?? 'GET', options.body ?? null);
         } else {
             return await fetch(url, options);
         }

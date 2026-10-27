@@ -131,9 +131,23 @@ function pickSubtitle(tracks) {
     const withUrl = tracks.filter(t => t && t.url);
     if (withUrl.length === 0) return "";
     const english = withUrl.find(t => t.language === "en" || /^english/i.test(t.label || ""));
-    const url = (english || withUrl[0]).url;
-    if (url.charAt(0) === '/') return `${AK_EDGE}${url}`;
-    return url;
+    return edgeUrl((english || withUrl[0]).url);
+}
+
+function edgeUrl(url) {
+    return url.charAt(0) === '/' ? `${AK_EDGE}${url}` : url;
+}
+
+// Shirox ignores per-stream subtitles and reads one shared `allSubtitles` list
+// instead (Sora ignores that key). Each track is labelled with its server,
+// since the timings follow that server's encode; English tracks go first.
+function shiroxTracks(label, tracks) {
+    if (!Array.isArray(tracks)) return [];
+    return tracks.filter(t => t && t.url).map(t => ({
+        title: `${t.label || t.language || "Subtitle"} (${label})`,
+        url: edgeUrl(t.url),
+        english: t.language === "en" || /^english/i.test(t.label || "")
+    }));
 }
 
 // ==========================================
@@ -283,6 +297,7 @@ async function extractStreamUrl(url) {
     console.log(`[Player] 🎬 Anikura — entry ${id}, episode ${epNumber}`);
 
     const streams = [];
+    const allSubtitles = [];
 
     try {
         for (const lang of AK_LANGS) {
@@ -322,6 +337,7 @@ async function extractStreamUrl(url) {
                 };
                 if (subtitle) entry.subtitle = subtitle;
                 streams.push(entry);
+                allSubtitles.push(...shiroxTracks(label, stream.tracks));
                 console.log(`   -> ${label} (${stream.kind || 'hls'})${subtitle ? ' + subtitle' : ''}`);
             }
         }
@@ -332,12 +348,14 @@ async function extractStreamUrl(url) {
 
         if (streams.length === 0) return JSON.stringify({ type: "none" });
 
-        // No top-level `subtitles`: a non-empty one would open a shared picker
-        // and override each stream's own track.
-        return JSON.stringify({
-            type: "servers",
-            streams: streams
-        });
+        // No top-level `subtitles`: in Sora a non-empty one would open a shared
+        // picker and override each stream's own track. Top-level `subtitle`
+        // (singular) is Shirox's default track and is ignored by Sora.
+        allSubtitles.sort((a, b) => b.english - a.english);
+        const result = { type: "servers", streams: streams };
+        if (streams[0].subtitle) result.subtitle = streams[0].subtitle;
+        if (allSubtitles.length) result.allSubtitles = allSubtitles.map(t => ({ title: t.title, url: t.url }));
+        return JSON.stringify(result);
     } catch (error) {
         console.log(`[Player] 🚨 ${error}`);
         return JSON.stringify({ type: "none" });

@@ -1,0 +1,34 @@
+{
+    "sourceName": "AnimeGG",
+    "iconUrl": "https://files.catbox.moe/caq4am.png",
+    "author": {
+        "name": "xdfkenny",
+        "icon": "https://yt3.googleusercontent.com/NHr6Y6qhYIUeoyIBdgeEYArXI1_ebVcLAuf562jPB6WSFTunOwPVuWC90eAG1zmeD6_Wy9_0mTs=s160-c-k-c0x00ffffff-no-rj",
+        "url": "https://github.com/xdfkenny"
+    },
+    "version": "1.0.2-k1",
+    "language": "English",
+    "languageType": [
+        "Subbed"
+    ],
+    "streamType": "mp4",
+    "quality": "1080p",
+    "baseUrl": "https://www.animegg.org/",
+    "searchBaseUrl": "https://www.animegg.org/",
+    "scriptUrl": "https://raw.githubusercontent.com/KevinPatel06/Kevin-s-Sora-modifcation/main/modules/animegg/animegg.js",
+    "type": "anime",
+    "asyncJS": true,
+    "softsub": true,
+    "downloadSupport": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "supportsMojuru": true,
+    "supportsDartotsu": true,
+    "supportsAnymex": true,
+    "supportsTsumi": true,
+    "supportsHiyoku": true,
+    "supportsShirox": true,
+    "supportsEclipse": true,
+    "scriptURL": "https://raw.githubusercontent.com/KevinPatel06/Kevin-s-Sora-modifcation/main/modules/animegg/animegg.js",
+    "changelog": "1.0.2-k1 (fork of xdfkenny 1.0.2): drop the bogus subtitle \"none\" Shirox tried to load, 1080p subbed first, one failing embed no longer empties the list"
+}

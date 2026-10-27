@@ -16,11 +16,15 @@ Actual modules go in `modules/<source-name>/` (manifest + script). Each manifest
 
 | Module | Upstream | What the fork changed |
 |---|---|---|
-| `anikura/` | MXFia19 | Subtitles attached per server; Supabase tracker removed. **The reference implementation** — `MODULE_CREATION.md` §9.10 |
-| `vidrift/` | MXFia19 | Subtitle urls made absolute (upstream's relative ones were silently dropped); tracker removed |
-| `aether/` | MXFia19 | Tracker removed. Subtitles already worked |
+| `anikura/` | MXFia19 | Subtitles attached per server; Supabase tracker removed; also emitted as `allSubtitles` + top-level `subtitle` for Shirox. **The reference implementation** — `MODULE_CREATION.md` §9.10 |
+| `vidrift/` | MXFia19 | Subtitle urls made absolute (upstream's relative ones were silently dropped); tracker removed. 2026-10-27: reads VidRift's new `orionStreams` (the `/api/source` relays all 502) with per-stream English subtitles |
+| `aether/` | MXFia19 | Tracker removed. Meridian gets its CDN's own Referer; Lul isn't pre-resolved (UA-bound token); no 5th `fetchv2` arg |
+| `anikoto/` | xdfkenny | Base64 decoded without `atob` (Shirox's returns `""` for binary, so streams came back empty) |
+| `animegg/` | xdfkenny | No bogus `subtitle: "none"` (Shirox tried to load it); 1080p subbed first; one failed embed no longer empties the list. Subs are burned in |
 | `bingebox/` | MXFia19 | Nothing — copied as-is (no tracker). **Doesn't work on device either (2026-09-29); parked, not maintained.** Its API is behind a Cloudflare challenge |
-| `kissasian/` | xdfkenny | Tries every server and skips the "coming soon" placeholder. Subtitles are burned into the video, not a separate track |
+| `kissasian/` | xdfkenny | Tries every server and skips the "coming soon" placeholder. **Parked 2026-10-27:** kissasian.su is now a bare API placeholder and dramavideo.se carries Indian TV only. Use KissKH for Asian dramas |
+
+Not forked on purpose: **hydrahd** (works upstream; needs Shirox's Secure DNS where `hydrahd.ws` is DNS-blocked), **allmanga / allmanga-shirox** (keygen rotates every few weeks and upstream keeps up; a copy would go stale), **anidb** (works; English is burned in).
 
 MXFia19's modules are published both at `github.com/MXFia19/module-sora` and `git.luna-app.eu/MXFia19/sources`; the copies here came from GitHub.
 
@@ -54,3 +58,7 @@ It gives the module only the globals `JavaScriptCore+Extensions.swift` defines (
 It makes raw http(s) requests rather than using Node's `fetch`, because Node adds `sec-fetch-*` headers that iOS never sends — VidRift answers those with a 403 the app doesn't get. A host behind a Cloudflare challenge (BingeBox) may block a desktop IP while working on a phone; a failure there isn't proof the module is broken.
 
 Passing here is a first check. Confirm on device via Settings → Logger (filter `Debug`).
+
+## Shirox
+
+Shirox (`../Shirox/`, a separate app) runs the same module format through its own JS bridge, which differs from Sora's in ways that break modules: per-stream and array `subtitles` are ignored, `atob` returns `""` for binary data, `fetch()` returns a response object rather than a string. `SHIROX_COMPAT.md` has the full list, a per-module status for the community library, and the fixes. Test with `tools/shirox-harness.js` (same CLI as above, plus `--env sora` for a side-by-side).

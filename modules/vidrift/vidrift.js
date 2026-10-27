@@ -119,6 +119,13 @@ function sourcePath(ref) {
         : `movie/${ref.id}`;
 }
 
+async function vrJson(url) {
+    const headers = { "User-Agent": VR_UA, "Accept": "application/json", "Referer": `${VR_EMBED}/` };
+    const body = await readBody(await soraFetch(url, { method: 'GET', headers: headers }));
+    if (!body) return null;
+    try { return JSON.parse(body); } catch (e) { return null; }
+}
+
 async function vrRelay(ref, token, provider) {
     const query = `token=${encodeURIComponent(token)}&provider=${encodeURIComponent(provider)}`;
     const url = `${VR_EMBED}/api/source/${sourcePath(ref)}?${query}`;
@@ -340,8 +347,55 @@ async function extractStreamUrl(url) {
             }
         }
 
+        // Orion (2026-10): direct HLS on the embed host, listed in embedMeta,
+        // one entry per audio version, each with its own subtitle list whose
+        // timings follow that encode. Playlists, segments and subtitles all
+        // want the embed host as Referer (403 without), which Shirox sends
+        // from `headers` and from each `allSubtitles` entry.
+        let orionDefault = "";
+        for (const orion of (Array.isArray(meta.orionStreams) ? meta.orionStreams : [])) {
+            const streamUrl = absoluteUrl(orion.url || orion.proxyUrl || "");
+            if (!streamUrl || streams.some(s => s.streamUrl === streamUrl)) continue;
+            const name = orion.name || `Orion ${orion.index + 1}`;
+            const top = Array.isArray(orion.rungs) && orion.rungs[0] ? ` ${orion.rungs[0].height}p` : "";
+            streams.push({
+                title: `VidRift ${name}${top}`,
+                streamUrl: streamUrl,
+                headers: { "Referer": `${VR_EMBED}/`, "User-Agent": VR_UA }
+            });
+            console.log(`   -> ${name}`);
+            if (!orion.subtitleListUrl) continue;
+            const list = await vrJson(absoluteUrl(orion.subtitleListUrl));
+            const tracks = list && Array.isArray(list.tracks) ? list.tracks : [];
+            for (const t of tracks) {
+                const subUrl = absoluteUrl(t.url || "");
+                if (!subUrl || allSubtitles.some(s => s.url === subUrl)) continue;
+                const english = t.lang === "en";
+                allSubtitles.push({
+                    url: subUrl,
+                    label: `${t.label || t.lang || "Subtitle"} (${name})`,
+                    kind: "captions",
+                    headers: { "Referer": `${VR_EMBED}/` },
+                    english: english
+                });
+                if (english && !orionDefault) orionDefault = subUrl;
+            }
+        }
+
+        // Other direct links embedMeta carries when it has them.
+        for (const [key, label] of [["evionUrl", "Evion"], ["vexonUrl", "Vexon"], ["bigbangUrl", "Bigbang"]]) {
+            const direct = typeof meta[key] === "string" ? meta[key] : "";
+            if (!/^https?:\/\//.test(direct) || streams.some(s => s.streamUrl === direct)) continue;
+            streams.push({
+                title: `VidRift ${label}`,
+                streamUrl: direct,
+                headers: { "Referer": `${VR_EMBED}/`, "User-Agent": VR_UA }
+            });
+            console.log(`   -> ${label}: ${direct.slice(0, 80)}…`);
+        }
+
         // The relays: they cover the titles VidRift does not self-host, and add
-        // qualities to the ones it does.
+        // qualities to the ones it does. (All three answered 502 on 2026-10-27.)
         if (meta.playbackToken) {
             for (const provider of VR_RELAYS) {
                 const data = await vrRelay(ref, meta.playbackToken, provider);
@@ -410,11 +464,22 @@ async function extractStreamUrl(url) {
 
         if (streams.length === 0) return JSON.stringify({ type: "none" });
 
+        // The default track should match the default stream, so Orion's English
+        // wins when Orion leads the list. English tracks go first in the menu.
+        if (orionDefault && streams[0].title.indexOf("Orion") !== -1) {
+            bestSubtitle = orionDefault;
+            bestSubtitleHeaders = { "Referer": `${VR_EMBED}/` };
+        }
+        allSubtitles.sort((a, b) => (b.english ? 1 : 0) - (a.english ? 1 : 0));
+        allSubtitles.forEach(s => { delete s.english; });
+
         return JSON.stringify({
             type: "servers",
             streams: streams,
             subtitles: bestSubtitle,
+            // Both spellings: Shirox reads `subtitleHeaders`.
             subtitlesHeaders: bestSubtitleHeaders,
+            subtitleHeaders: bestSubtitleHeaders,
             allSubtitles: allSubtitles
         });
     } catch (error) {

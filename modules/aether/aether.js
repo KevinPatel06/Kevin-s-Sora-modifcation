@@ -14,7 +14,9 @@ const SITE_URL = "https://aether.ist";
 // field   = la clé qui contient l'URL du flux dans la réponse JSON.
 // tvSeg   = le segment utilisé pour les séries (Meridian utilise "show" au lieu de "tv").
 const PROVIDERS = [
-    { name: "Link",     base: "https://link.aether.cx",      field: "stream",  tvSeg: "tv" },
+    // Fork: Link's CDN (rotating *.site hosts) serves the playlists to anyone but answers
+    // 403 to a segment request that carries any Referer or Origin, so it gets no headers.
+    { name: "Link",     base: "https://link.aether.cx",      field: "stream",  tvSeg: "tv", noHeaders: true },
     { name: "Vidy",     base: "https://vidy.aether.cx",      field: "stream",  tvSeg: "tv" },
     { 
         name: "Nebula",   
@@ -58,7 +60,8 @@ const PROVIDERS = [
              return null;
         }
     },
-    { name: "Tiki",     base: "https://tiki.aether.cx",      field: "stream",  tvSeg: "tv" },
+    // Fork: Tiki dropped. Its playlist host (vip.1x2.space) has answered 403 to every
+    // request since 2026-10-26, whatever the Referer or User-Agent; it only cluttered the list.
     { name: "Lul",      base: "https://lul.aether.cx",       field: "stream",  tvSeg: "tv" }
 ];
 
@@ -341,6 +344,7 @@ async function extractStreamUrl(url) {
                     const origin = (rawStreamData.match(/^https?:\/\/[^/]+/) || [""])[0];
                     if (origin) customHeaders = { "Origin": origin, "Referer": `${origin}/` };
                 }
+                if (provider.noHeaders) customHeaders = {};
                 // Fork: links without an extension (Lul's worker) are handed to the
                 // player as they are, plus the .m3u8 hint. They used to be resolved
                 // here with a HEAD first, but the address they redirect to carries a

@@ -17,7 +17,7 @@ Actual modules go in `modules/<source-name>/` (manifest + script). Each manifest
 | Module | Upstream | What the fork changed |
 |---|---|---|
 | `anikura/` | MXFia19 | Subtitles attached per server; Supabase tracker removed; also emitted as `allSubtitles` + top-level `subtitle` for Shirox. **The reference implementation** — `MODULE_CREATION.md` §9.10 |
-| `vidrift/` | MXFia19 | Subtitle urls made absolute (upstream's relative ones were silently dropped); tracker removed. 2026-10-27: reads VidRift's new `orionStreams` (the `/api/source` relays all 502) with per-stream English subtitles |
+| `vidrift/` | MXFia19 | Subtitle urls made absolute (upstream's relative ones were silently dropped); tracker removed. 2026-10-27: reads VidRift's new `orionStreams` (the `/api/source` relays all 502) with per-stream English subtitles. 2026-10-28: re-asks for the embed page (4 × 5 s) when it has no links yet — VidRift fills an episode in only after its first request |
 | `aether/` | MXFia19 | Tracker removed. Meridian gets its CDN's own Referer; Link gets **no** headers (its CDN 403s segments with any Referer/Origin, so Shirox downloads of Link fail: Shirox adds a Referer); Lul isn't pre-resolved (UA-bound token); dead Tiki removed; no 5th `fetchv2` arg |
 | `anikoto/` | xdfkenny | Base64 decoded without `atob` (Shirox's returns `""` for binary, so streams came back empty) |
 | `animegg/` | xdfkenny | No bogus `subtitle: "none"` (Shirox tried to load it); 1080p subbed first; one failed embed no longer empties the list. Subs are burned in |

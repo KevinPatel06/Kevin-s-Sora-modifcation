@@ -95,6 +95,15 @@ function parseEmbedMeta(html) {
     try { return JSON.parse(match[1]); } catch (e) { return null; }
 }
 
+function hasDirectLinks(meta) {
+    if (Array.isArray(meta.orionStreams) && meta.orionStreams.length > 0) return true;
+    return ["selfhostUrl", "evionUrl", "vexonUrl", "bigbangUrl"].some(k => /^https?:\/\//.test(meta[k] || ""));
+}
+
+function pause(ms) {
+    return new Promise(resolve => typeof setTimeout === 'function' ? setTimeout(resolve, ms) : resolve());
+}
+
 // The subtitle list is declared just before embedMeta, under a variable name
 // that changes from build to build, so match it by shape rather than by name.
 function parseSubtitleList(html) {
@@ -323,10 +332,21 @@ async function extractStreamUrl(url) {
             return JSON.stringify({ type: "none" });
         }
 
-        const meta = parseEmbedMeta(html);
+        let meta = parseEmbedMeta(html);
         if (!meta) {
             console.log(`[Player] ⚠️ embedMeta unreadable.`);
             return JSON.stringify({ type: "none" });
+        }
+
+        // VidRift fetches an episode the first time anyone asks for it: that
+        // first page has no orionStreams, and they appear 10-15 s later. Ask
+        // again a few times. (Shirox has setTimeout; Sora has none, so there
+        // the retries run back to back and rarely help.)
+        for (let attempt = 1; attempt <= 4 && !hasDirectLinks(meta); attempt++) {
+            console.log(`[Player] ⏳ No streams yet, asking again (${attempt}/4)…`);
+            await pause(5000);
+            const again = parseEmbedMeta(await vrEmbedPage(path));
+            if (again) meta = again;
         }
 
         console.log(`[Player] 🧩 provider=${meta.provider} selfhostKind=${meta.selfhostKind || 'none'}`);
